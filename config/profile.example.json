@@ -1,0 +1,62 @@
+{
+  "personal": {
+    "full_name": "",
+    "preferred_name": "",
+    "email": "",
+    "phone": "",
+    "city": "",
+    "province_state": "",
+    "country": "",
+    "postal_code": "",
+    "address": "",
+    "linkedin_url": "",
+    "github_url": "",
+    "portfolio_url": "",
+    "website_url": ""
+  },
+  "work_authorization": {
+    "legally_authorized_to_work": true,
+    "require_sponsorship": false,
+    "work_permit_type": ""
+  },
+  "compensation": {
+    "salary_expectation": "",
+    "salary_currency": "",
+    "salary_range_min": "",
+    "salary_range_max": "",
+    "currency_conversion_note": "For non-INR salary forms, do not guess an exchange rate; stop for manual review unless a current verified conversion is available."
+  },
+  "experience": {
+    "years_of_experience_total": "",
+    "education_level": "",
+    "current_title": "",
+    "target_role": ""
+  },
+  "skills_boundary": {
+    "programming_languages": [],
+    "frameworks": [],
+    "tools": []
+  },
+  "resume_facts": {
+    "preserved_companies": [],
+    "preserved_projects": [],
+    "preserved_school": "",
+    "real_metrics": []
+  },
+  "eeo_voluntary": {
+    "gender": "Decline to self-identify",
+    "race_ethnicity": "Decline to self-identify",
+    "veteran_status": "Decline to self-identify",
+    "disability_status": "Decline to self-identify"
+  },
+  "availability": {
+    "earliest_start_date": ""
+  },
+  "education": {
+    "degree": "",
+    "specialization": "",
+    "institution": "",
+    "dates": "",
+    "cgpa": ""
+  }
+}

@@ -1,0 +1,93 @@
+defaults:
+  location: Hyderabad, Telangana, India
+  distance: 0
+  hours_old: 168
+  results_per_site: 20
+  country_indeed: India
+sites:
+- indeed
+- linkedin
+- zip_recruiter
+locations:
+- label: Hyderabad
+  location: Hyderabad, Telangana, India
+  remote: false
+- label: Bengaluru
+  location: Bengaluru, Karnataka, India
+  remote: false
+- label: Noida
+  location: Noida, Uttar Pradesh, India
+  remote: false
+- label: Gurugram
+  location: Gurugram, Haryana, India
+  remote: false
+- label: Delhi
+  location: Delhi, India
+  remote: false
+- label: Chennai
+  location: Chennai, Tamil Nadu, India
+  remote: false
+- label: Remote worldwide
+  location: Remote
+  remote: true
+queries:
+- query: Associate Product Manager
+  tier: 1
+- query: Junior Product Manager
+  tier: 1
+- query: Product Manager I
+  tier: 1
+- query: Product Analyst
+  tier: 1
+- query: Associate Product Analyst
+  tier: 2
+- query: Technical Product Manager
+  tier: 2
+- query: Software Engineer I
+  tier: 1
+- query: Associate Software Engineer
+  tier: 1
+- query: Frontend Engineer
+  tier: 2
+- query: Backend Engineer
+  tier: 2
+- query: Full Stack Developer
+  tier: 2
+- query: Azure Developer
+  tier: 1
+- query: Cloud Engineer
+  tier: 1
+- query: Python Developer
+  tier: 2
+- query: Data Engineer
+  tier: 2
+- query: AI Engineer
+  tier: 2
+- query: Applied AI Engineer
+  tier: 2
+location_accept: &id001
+- Hyderabad
+- Bengaluru
+- Bangalore
+- Noida
+- Gurugram
+- Gurgaon
+- Delhi
+- Chennai
+- India
+location_reject_non_remote: []
+location:
+  primary: Hyderabad
+  accept_patterns: *id001
+  reject_patterns: []
+exclude_titles:
+- Business Analyst
+- Strategy Analyst
+- Strategy Consultant
+- Management Consultant
+- Business Operations Analyst
+- Program Analyst
+- Program Manager
+- Project Manager
+- Operations Analyst
+- Financial Analyst
