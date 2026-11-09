@@ -77,12 +77,57 @@ class ClaudeCLIError(RuntimeError):
     """Claude Code CLI invocation or response failed."""
 
 
+def claude_cli_path() -> str | None:
+    """Locate the `claude` binary, including where its installer puts it.
+
+    Scheduled services (systemd) often lack ~/.local/bin on PATH, so check the
+    usual install locations too. CLAUDE_BIN overrides everything.
+    """
+    import shutil
+    from pathlib import Path
+
+    env = os.environ.get("CLAUDE_BIN", "").strip()
+    if env:
+        return env
+    found = shutil.which("claude")
+    if found:
+        return found
+    for cand in (Path.home() / ".local/bin/claude", Path.home() / ".claude/local/claude",
+                 Path("/usr/local/bin/claude")):
+        if cand.exists():
+            return str(cand)
+    return None
+
+
+# Messages the CLI gives when the subscription's usage limit is reached.
+_CLI_LIMIT_HINTS = ("usage limit", "limit reached", "out of extra usage",
+                    "hit your limit", "limit will reset", "resets at")
+_CLI_AUTH_HINTS = ("not logged in", "please run /login", "invalid api key", "authentication",
+                   "oauth token", "login")
+
+
 class ClaudeCLIClient:
-    """Text-only LLM client backed by the authenticated Claude Code CLI."""
+    """Text-only LLM client backed by the authenticated Claude Code CLI.
+
+    Works with a Claude subscription (Pro/Max) after `claude` has been logged
+    in once on this machine; no API credit needed. Model: CLAUDE_MODEL (an
+    alias such as haiku / sonnet / opus, or a full model ID).
+    """
 
     def __init__(self, model: str = "sonnet") -> None:
         self.model = model
         self.timeout = int(os.environ.get("CLAUDE_TIMEOUT", "240"))
+        self.binary = claude_cli_path() or "claude"
+
+    @staticmethod
+    def _classify(detail: str) -> None:
+        low = detail.lower()
+        if any(h in low for h in _CLI_LIMIT_HINTS):
+            raise ClaudeUsageLimit(f"Claude subscription usage limit reached: {detail[:500]}")
+        if any(h in low for h in _CLI_AUTH_HINTS):
+            raise ClaudeCLIError(
+                "Claude Code is not logged in on this machine. Run `claude` once in a terminal, "
+                f"log in with your Claude account, then retry. Details: {detail[:300]}")
 
     def chat(
         self,
@@ -99,7 +144,7 @@ class ClaudeCLIClient:
         prompt = "\n\n".join(sections)
 
         command = [
-            "claude", "-p",
+            self.binary, "-p",
             "--model", self.model,
             "--output-format", "json",
             "--tools", "",
@@ -127,6 +172,11 @@ class ClaudeCLIClient:
 
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip()
+            try:  # JSON error bodies carry the message in "result"
+                detail = json.loads(completed.stdout).get("result") or detail
+            except Exception:
+                pass
+            self._classify(str(detail))
             raise ClaudeCLIError(
                 f"Claude CLI exited with code {completed.returncode}: {detail[:1500]}"
             )
@@ -139,6 +189,7 @@ class ClaudeCLIClient:
             ) from exc
 
         if response.get("is_error"):
+            self._classify(str(response.get("result", "")))
             raise ClaudeCLIError(
                 f"Claude CLI reported an error: {response.get('result', 'Unknown error')}"
             )
@@ -332,6 +383,10 @@ class GeminiRateLimited(RuntimeError):
 
 class ClaudeCreditExhausted(LLMQuotaExhausted):
     """The Anthropic API account is out of credit or over its spend limit."""
+
+
+class ClaudeUsageLimit(LLMQuotaExhausted):
+    """The Claude subscription (used via Claude Code) hit its usage limit for now."""
 
 
 def _is_hard_gemini_quota_error(resp: httpx.Response) -> bool:
@@ -783,6 +838,9 @@ def get_client():
             model = os.environ.get("CLAUDE_MODEL", "sonnet")
             log.info("LLM provider: Claude Code CLI  model: %s", model)
             _instance = ClaudeCLIClient(model)
+            if not claude_cli_path():
+                log.warning("LLM_PROVIDER=claude_cli but the `claude` command wasn't found. "
+                            "Install Claude Code and log in, or set CLAUDE_BIN.")
         elif provider == "kie":
             key = os.environ.get("KIE_API_KEY", "")
             if not key:
@@ -804,10 +862,21 @@ def get_client():
             _instance = primary
             # Claude API as automatic fallback (e.g. Gemini free tier first, then Claude).
             fb = os.environ.get("LLM_FALLBACK_PROVIDER", "").strip().lower()
-            if os.environ.get("ANTHROPIC_API_KEY") and fb not in ("none", "off", "false"):
-                claude = AnthropicClient()
+            name = "Gemini" if primary._is_gemini else base_url
+            fallback = fallback_name = None
+            if fb in ("claude_cli", "claude-cli", "claude_code", "subscription"):
+                # Claude Pro/Max subscription through the logged-in Claude Code CLI.
+                if claude_cli_path():
+                    fallback = ClaudeCLIClient(os.environ.get("CLAUDE_MODEL", "").strip() or "haiku")
+                    fallback_name = f"Claude Code CLI ({fallback.model})"
+                else:
+                    log.warning("LLM_FALLBACK_PROVIDER=claude_cli but the `claude` command wasn't "
+                                "found; running without a fallback. Install Claude Code and log in.")
+            elif os.environ.get("ANTHROPIC_API_KEY") and fb not in ("none", "off", "false"):
+                fallback = AnthropicClient()
+                fallback_name = f"Claude API ({fallback.model})"
+            if fallback is not None:
                 primary.fail_fast_on_rate_limit = True
-                name = "Gemini" if primary._is_gemini else base_url
-                log.info("LLM fallback: Claude API  model: %s (used when %s is limited)", claude.model, name)
-                _instance = FallbackClient(primary, claude, name, f"Claude ({claude.model})")
+                log.info("LLM fallback: %s (used when %s is limited)", fallback_name, name)
+                _instance = FallbackClient(primary, fallback, name, fallback_name)
     return _instance

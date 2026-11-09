@@ -586,7 +586,17 @@ def doctor() -> None:
     elif has_gemini:
         model = os.environ.get("LLM_MODEL", "").strip() or "gemini-3.5-flash"
         results.append(("LLM API key", ok_mark, f"Gemini ({model})"))
-        if os.environ.get("ANTHROPIC_API_KEY"):
+        fbp = os.environ.get("LLM_FALLBACK_PROVIDER", "").strip().lower()
+        if fbp in ("claude_cli", "claude-cli", "claude_code", "subscription"):
+            from applypilot.llm import claude_cli_path
+            cm = os.environ.get("CLAUDE_MODEL", "").strip() or "haiku"
+            if claude_cli_path():
+                results.append(("LLM fallback", ok_mark,
+                                f"Claude Code CLI ({cm}, your Claude subscription) when Gemini is limited"))
+            else:
+                results.append(("LLM fallback", fail_mark,
+                                "LLM_FALLBACK_PROVIDER=claude_cli but `claude` not found: install Claude Code"))
+        elif os.environ.get("ANTHROPIC_API_KEY") and fbp not in ("none", "off", "false"):
             cm = os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-haiku-5-5"
             results.append(("LLM fallback", ok_mark, f"Claude API ({cm}) when Gemini is limited"))
     elif os.environ.get("ANTHROPIC_API_KEY") and not (has_openai or has_local):
