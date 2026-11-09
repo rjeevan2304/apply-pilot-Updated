@@ -158,7 +158,8 @@ def test_gemini_plus_claude_key_gives_fallback(clean_env):
     c = llm.get_client()
     assert isinstance(c, llm.FallbackClient)
     assert c.primary._is_gemini and c.primary.fail_fast_on_rate_limit
-    assert c.fallback.model == "claude-opus-5-5"
+    assert c.fallback.model == "claude-haiku-5-5"
+    assert c.primary.model == "gemini-3.5-flash"
 
 
 def test_gemini_only_has_no_fallback(clean_env):

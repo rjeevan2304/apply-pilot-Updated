@@ -203,10 +203,30 @@ def sync_to_gcs(local_dir: Path, gcs_uri: str) -> int:
             "google-cloud-storage is not installed. Run: pip install -e '.[gcp]'"
         ) from exc
 
-    import base64
+    from google.api_core import exceptions as gexc
 
     bucket_name, prefix = _parse_gcs_uri(gcs_uri)
-    client = storage.Client()
+    try:
+        return _sync(storage.Client(), local_dir, gcs_uri, bucket_name, prefix)
+    except gexc.NotFound as exc:
+        raise RuntimeError(
+            f"Bucket '{bucket_name}' not found. Check the name in APPLYPILOT_GCS_URI "
+            f"(Cloud Console > Cloud Storage > Buckets)."
+        ) from exc
+    except (gexc.Forbidden, gexc.Unauthorized) as exc:
+        detail = str(exc).lower()
+        if "scope" in detail:
+            hint = ("the VM's access scopes don't allow writing to Cloud Storage. Stop the VM, "
+                    "Edit > Access scopes > 'Set access for each API' > Storage: Read Write, then start it.")
+        else:
+            hint = ("the VM's service account can't write to this bucket. In the bucket's Permissions tab, "
+                    "grant the VM's service account the 'Storage Object Admin' role.")
+        raise RuntimeError(f"Cloud Storage refused access to gs://{bucket_name}: {hint}") from exc
+
+
+def _sync(client, local_dir: Path, gcs_uri: str, bucket_name: str, prefix: str) -> int:
+    import base64
+
     bucket = client.bucket(bucket_name)
 
     remote_md5 = {
