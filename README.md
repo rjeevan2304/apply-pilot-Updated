@@ -131,7 +131,13 @@ With both keys set, every request goes to Gemini first. Claude is used:
   returns 404 (usually a retired `LLM_MODEL`).
 
 If Claude is also out of credit, scoring stops and the remaining jobs stay pending for the
-next run. Set `LLM_FALLBACK_PROVIDER=none` to turn the fallback off, or leave out
+next run.
+
+**Using a Claude Pro/Max subscription instead of API credit:** install Claude Code on the VM
+(`curl -fsSL https://claude.ai/install.sh | bash`), run `claude` once and log in with your
+Claude account, then set `LLM_FALLBACK_PROVIDER=claude_cli` in `.env` (optionally
+`CLAUDE_MODEL=haiku|sonnet|opus`, default `haiku`). Requests then count against your
+subscription's usage limits; when a limit is hit, scoring stops until the next run. Set `LLM_FALLBACK_PROVIDER=none` to turn the fallback off, or leave out
 `GEMINI_API_KEY` to use Claude only. `applypilot doctor` shows which is active.
 
 ### LLM: kie.ai with a fallback model
