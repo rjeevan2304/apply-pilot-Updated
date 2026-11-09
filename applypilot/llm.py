@@ -5,6 +5,9 @@ Auto-detects provider from environment:
   GEMINI_API_KEY  -> Google Gemini (default: gemini-2.0-flash)
   OPENAI_API_KEY  -> OpenAI (default: gpt-4o-mini)
   LLM_URL         -> Local llama.cpp / Ollama compatible endpoint
+  ANTHROPIC_API_KEY -> Claude API: the automatic fallback when Gemini/OpenAI/local
+                     is rate limited or out of quota; the main provider if it's the
+                     only key (or LLM_PROVIDER=anthropic). ANTHROPIC_MODEL picks the model.
   LLM_PROVIDER=kie + KIE_API_KEY -> kie.ai (Claude / DeepSeek), with
                      LLM_FALLBACK_MODEL used on token/credit limits
 
@@ -315,8 +318,20 @@ class KieClaudeClient:
         self._client.close()
 
 
-class GeminiQuotaExhausted(RuntimeError):
+class LLMQuotaExhausted(RuntimeError):
+    """A provider's hard quota / credit is used up; more requests won't succeed today."""
+
+
+class GeminiQuotaExhausted(LLMQuotaExhausted):
     """Raised when Gemini reports a hard daily/monthly quota or billing limit."""
+
+
+class GeminiRateLimited(RuntimeError):
+    """Gemini is still rate limiting (429/503) after a retry; raised only when a fallback exists."""
+
+
+class ClaudeCreditExhausted(LLMQuotaExhausted):
+    """The Anthropic API account is out of credit or over its spend limit."""
 
 
 def _is_hard_gemini_quota_error(resp: httpx.Response) -> bool:
@@ -395,6 +410,9 @@ class LLMClient:
         # True once we've confirmed the native Gemini API works for this model
         self._use_native_gemini: bool = False
         self._is_gemini: bool = base_url.startswith(_GEMINI_COMPAT_BASE)
+        # Set by get_client() when a fallback provider exists: give up on a
+        # rate limit after one short retry instead of waiting up to ~12 minutes.
+        self.fail_fast_on_rate_limit: bool = False
 
     # -- Native Gemini API --------------------------------------------------
 
@@ -548,6 +566,11 @@ class LLMClient:
                         f"(HTTP 429): {resp.text[:1000]}"
                     ) from exc
 
+                if resp.status_code in (429, 503) and self.fail_fast_on_rate_limit and attempt >= 1:
+                    raise GeminiRateLimited(
+                        f"Still rate limited (HTTP {resp.status_code}) after a retry: {resp.text[:300]}"
+                    ) from exc
+
                 if resp.status_code in (429, 503) and attempt < _MAX_RETRIES - 1:
                     # Respect Retry-After header if provided (Gemini sends this).
                     retry_after = (
@@ -561,6 +584,8 @@ class LLMClient:
                             wait = _RATE_LIMIT_BASE_WAIT * (2 ** attempt)
                     else:
                         wait = min(_RATE_LIMIT_BASE_WAIT * (2 ** attempt), 300)
+                    if self.fail_fast_on_rate_limit:
+                        wait = min(wait, 60)
 
                     log.warning(
                         "LLM rate limited (HTTP %s). Waiting %ds before retry %d/%d. "
@@ -601,10 +626,132 @@ class _GeminiCompatForbidden(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Anthropic (Claude API) client
+# ---------------------------------------------------------------------------
+
+# Models that accept server-side refusal fallbacks (fallbacks="default").
+_SERVER_FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
+# Current Claude models think before answering, and thinking counts toward
+# max_tokens, so callers' small limits (e.g. 512 for scoring) would truncate.
+_CLAUDE_MIN_MAX_TOKENS = 16000
+
+
+class AnthropicClient:
+    """Claude via the official Anthropic SDK (ANTHROPIC_API_KEY).
+
+    Model: ANTHROPIC_MODEL (default claude-opus-5-5). Optional ANTHROPIC_EFFORT
+    (low | medium | high | xhigh | max) trades depth for cost.
+    """
+
+    def __init__(self, model: str = "", api_key: str = "") -> None:
+        import anthropic  # imported lazily so Gemini-only setups don't need it
+
+        self._anthropic = anthropic
+        self.model = model or os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-opus-5-5"
+        self.effort = os.environ.get("ANTHROPIC_EFFORT", "").strip() or None
+        self._client = anthropic.Anthropic(api_key=api_key or None, max_retries=4)
+
+    def chat(self, messages: list[dict], temperature: float = 0.0, max_tokens: int = 4096) -> str:
+        # `temperature` is accepted for interface compatibility but not sent:
+        # current Claude models reject sampling parameters.
+        anthropic = self._anthropic
+        system = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
+        convo = [{"role": m["role"], "content": m.get("content", "")}
+                 for m in messages if m.get("role") in ("user", "assistant")]
+        kwargs: dict = {
+            "model": self.model,
+            "max_tokens": max(max_tokens, _CLAUDE_MIN_MAX_TOKENS),
+            "messages": convo,
+        }
+        if system:
+            kwargs["system"] = system
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
+
+        try:
+            if self.model in _SERVER_FALLBACK_MODELS:
+                # On a safety-classifier refusal, re-run server-side on Anthropic's
+                # recommended fallback model instead of returning the refusal.
+                resp = self._client.beta.messages.create(
+                    betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
+            else:
+                resp = self._client.messages.create(**kwargs)
+        except anthropic.AuthenticationError as exc:
+            raise RuntimeError(f"ANTHROPIC_API_KEY was rejected: {exc.message}") from exc
+        except anthropic.APIStatusError as exc:
+            msg = str(getattr(exc, "message", exc)).lower()
+            if exc.status_code == 402 or "credit balance" in msg or "spend limit" in msg:
+                raise ClaudeCreditExhausted(f"Claude API credit/spend limit reached: {exc.message}") from exc
+            raise
+
+        if resp.stop_reason == "refusal":
+            raise RuntimeError(f"Claude declined the request ({getattr(resp, 'stop_details', None)})")
+        text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+        if not text:
+            raise RuntimeError(f"Claude returned no text (stop_reason={resp.stop_reason})")
+        return text
+
+    def ask(self, prompt: str, **kwargs) -> str:
+        return self.chat([{"role": "user", "content": prompt}], **kwargs)
+
+    def close(self) -> None:
+        self._client.close()
+
+
+class FallbackClient:
+    """Use `primary` (e.g. Gemini free tier); switch to `fallback` (Claude) when it's limited.
+
+    - Hard quota exhausted (daily/monthly): switch for the rest of the run.
+    - Rate limited even after a retry, or timing out: use the fallback for that request only.
+    """
+
+    def __init__(self, primary, fallback, primary_name: str, fallback_name: str) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.primary_name = primary_name
+        self.fallback_name = fallback_name
+        self._primary_exhausted = False
+        self.model = getattr(primary, "model", primary_name)
+
+    def chat(self, messages: list[dict], temperature: float = 0.0, max_tokens: int = 4096) -> str:
+        if self._primary_exhausted:
+            return self.fallback.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        try:
+            return self.primary.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        except LLMQuotaExhausted as exc:
+            self._primary_exhausted = True
+            log.warning("%s quota exhausted; using %s for the rest of this run. (%s)",
+                        self.primary_name, self.fallback_name, str(exc)[:200])
+        except (GeminiRateLimited, httpx.TimeoutException) as exc:
+            log.warning("%s rate limited/slow; using %s for this request. (%s)",
+                        self.primary_name, self.fallback_name, str(exc)[:200])
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                log.warning("%s returned 404 (model %r not found? set LLM_MODEL); using %s.",
+                            self.primary_name, self.model, self.fallback_name)
+                return self.fallback.chat(messages, temperature=temperature, max_tokens=max_tokens)
+            if exc.response.status_code not in (429, 503):
+                raise
+            log.warning("%s returned HTTP %s; using %s for this request.",
+                        self.primary_name, exc.response.status_code, self.fallback_name)
+        return self.fallback.chat(messages, temperature=temperature, max_tokens=max_tokens)
+
+    def ask(self, prompt: str, **kwargs) -> str:
+        return self.chat([{"role": "user", "content": prompt}], **kwargs)
+
+    def close(self) -> None:
+        for c in (self.primary, self.fallback):
+            try:
+                c.close()
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
 
-_instance: LLMClient | None = None
+_instance = None  # LLMClient | AnthropicClient | FallbackClient | ...
 
 
 _model_clients: dict = {}
@@ -643,8 +790,24 @@ def get_client():
             model = os.environ.get("LLM_MODEL", "").strip() or "claude-haiku-5-5"
             log.info("LLM provider: kie.ai  model: %s", model)
             _instance = KieClaudeClient(model, key, os.environ.get("KIE_URL", ""))
+        elif provider in ("anthropic", "claude"):
+            _instance = AnthropicClient()
+            log.info("LLM provider: Claude API  model: %s", _instance.model)
+        elif not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")) \
+                and os.environ.get("ANTHROPIC_API_KEY"):
+            _instance = AnthropicClient()
+            log.info("LLM provider: Claude API  model: %s", _instance.model)
         else:
             base_url, model, api_key = _detect_provider()
             log.info("LLM provider: %s  model: %s", base_url, model)
-            _instance = LLMClient(base_url, model, api_key)
+            primary = LLMClient(base_url, model, api_key)
+            _instance = primary
+            # Claude API as automatic fallback (e.g. Gemini free tier first, then Claude).
+            fb = os.environ.get("LLM_FALLBACK_PROVIDER", "").strip().lower()
+            if os.environ.get("ANTHROPIC_API_KEY") and fb not in ("none", "off", "false"):
+                claude = AnthropicClient()
+                primary.fail_fast_on_rate_limit = True
+                name = "Gemini" if primary._is_gemini else base_url
+                log.info("LLM fallback: Claude API  model: %s (used when %s is limited)", claude.model, name)
+                _instance = FallbackClient(primary, claude, name, f"Claude ({claude.model})")
     return _instance

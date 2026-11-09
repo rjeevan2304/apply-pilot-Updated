@@ -113,6 +113,27 @@ time_budget_minutes: 240          # optional: stop searching after this long
 LinkedIn detail pages are fetched at most 15 per pass with random delays; the pass stops at the
 first block or login wall, and a failed page is retried at most twice on later runs.
 
+### LLM: Gemini free tier first, Claude API as fallback
+
+In `~/.applypilot/.env`:
+
+```
+GEMINI_API_KEY=...                 # main LLM (free tier)
+ANTHROPIC_API_KEY=...              # fallback LLM (Claude API, paid per use)
+# ANTHROPIC_MODEL=claude-opus-5-5  # default; e.g. claude-sonnet-5-5 or claude-haiku-5-5 cost less
+# ANTHROPIC_EFFORT=medium          # low | medium | high | xhigh | max
+```
+
+With both keys set, every request goes to Gemini first. Claude is used:
+
+- for the rest of the run once Gemini's daily/monthly quota is used up;
+- for a single request when Gemini is still rate limited after one retry, times out, or
+  returns 404 (usually a retired `LLM_MODEL`).
+
+If Claude is also out of credit, scoring stops and the remaining jobs stay pending for the
+next run. Set `LLM_FALLBACK_PROVIDER=none` to turn the fallback off, or leave out
+`GEMINI_API_KEY` to use Claude only. `applypilot doctor` shows which is active.
+
 ### LLM: kie.ai with a fallback model
 
 In `~/.applypilot/.env`:

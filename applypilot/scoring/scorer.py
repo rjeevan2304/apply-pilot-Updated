@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from applypilot.config import RESUME_PATH, load_profile
 from applypilot.database import get_connection, get_jobs_by_stage, job_company
-from applypilot.llm import GeminiQuotaExhausted, get_client_for
+from applypilot.llm import LLMQuotaExhausted, get_client_for
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def score_job(resume_text: str, job: dict) -> dict:
         client = get_client_for("LLM_SCORE_MODEL")
         response = client.chat(messages, max_tokens=512, temperature=0.2)
         return _parse_score_response(response)
-    except GeminiQuotaExhausted:
+    except LLMQuotaExhausted:
         raise
     except Exception as e:
         log.error("LLM error scoring job '%s': %s", job.get("title", "?"), e)
@@ -177,12 +177,12 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     for job in jobs:
         try:
             result = score_job(resume_text, job)
-        except GeminiQuotaExhausted as exc:
+        except LLMQuotaExhausted as exc:
             completed += 1
             errors += 1
             quota_exhausted = True
             log.error(
-                "Gemini hard quota exhausted at job %d/%d. "
+                "LLM quota/credit exhausted (no fallback left) at job %d/%d. "
                 "Stopping this batch; remaining jobs stay pending. Details: %s",
                 completed, len(jobs), exc,
             )
