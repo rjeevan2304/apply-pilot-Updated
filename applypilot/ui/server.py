@@ -12,11 +12,14 @@ Standard library only, plus google-cloud-storage when using --gcs.
 from __future__ import annotations
 
 import csv
+import hashlib
+import hmac
 import io
 import json
 import mimetypes
 import os
 import threading
+import time
 import webbrowser
 from datetime import datetime
 from http import HTTPStatus
@@ -27,6 +30,48 @@ from urllib.parse import parse_qs, unquote, urlparse
 STATIC = Path(__file__).with_name("static")
 DECISIONS = ("apply", "retry", "no", "lowpay")  # green, yellow, red, pink
 UI_HOME = Path(os.environ.get("APPLYPILOT_UI_DIR", Path.home() / ".applypilot-ui"))
+
+
+# -- optional password (for hosting, e.g. Cloud Run) --------------------------------
+COOKIE = "ap_session"
+SESSION_DAYS = 30
+
+
+def _password() -> str:
+    return os.environ.get("APPLYPILOT_UI_PASSWORD", "")
+
+
+def _sign(expires: int) -> str:
+    key = hashlib.sha256(("applypilot-ui:" + _password()).encode("utf-8")).digest()
+    mac = hmac.new(key, str(expires).encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{expires}.{mac}"
+
+
+def _valid_session(cookie_header: str | None) -> bool:
+    if not _password():
+        return True
+    for part in (cookie_header or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == COOKIE and "." in value:
+            exp = value.split(".", 1)[0]
+            if exp.isdigit() and int(exp) > time.time() and hmac.compare_digest(value, _sign(int(exp))):
+                return True
+    return False
+
+
+LOGIN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>ApplyPilot login</title>
+<style>:root{--bg:#f6f7f9;--panel:#fff;--text:#1d2330;--line:#e3e6ec;--accent:#2f6fed;--err:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#12151b;--panel:#1a1f27;--text:#e6e9ef;--line:#2a313c;--accent:#6d9cff}}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);
+font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+form{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;width:min(340px,90vw)}
+h1{font-size:18px;margin:0 0 14px}input,button{width:100%;padding:10px;border-radius:8px;font:inherit;box-sizing:border-box}
+input{border:1px solid var(--line);background:var(--panel);color:var(--text);margin-bottom:10px}
+button{border:0;background:var(--accent);color:#fff;cursor:pointer}.e{color:var(--err);margin:0 0 10px}</style></head>
+<body><form method="post" action="/login"><h1>ApplyPilot</h1>__ERROR__
+<input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
+<button type="submit">Log in</button></form></body></html>"""
 
 
 def _now() -> str:
@@ -160,6 +205,10 @@ class App:
     # -- data -------------------------------------------------------------------
     def refresh(self) -> None:
         with self.lock:
+            cache = getattr(self.source, "cache", None)
+            if cache is not None:
+                import shutil
+                shutil.rmtree(cache / "jobs", ignore_errors=True)
             raw = self.source.read("status.json", fresh=True)
             try:
                 self.status = json.loads(raw) if raw else {}
@@ -205,13 +254,35 @@ def make_handler(app: App):
         def _json(self, obj, code: int = 200) -> None:
             self._send(code, json.dumps(obj).encode("utf-8"), "application/json")
 
+        def _secure(self) -> bool:
+            return self.headers.get("X-Forwarded-Proto", "") == "https"
+
+        def _authed(self) -> bool:
+            return _valid_session(self.headers.get("Cookie"))
+
+        def _login_page(self, error: str = "", code: int = 200) -> None:
+            html = LOGIN_PAGE.replace("__ERROR__", f'<p class="e">{error}</p>' if error else "")
+            self._send(code, html.encode("utf-8"), "text/html; charset=utf-8")
+
         def do_GET(self):
             url = urlparse(self.path)
+            if url.path == "/healthz":
+                return self._send(200, b"ok", "text/plain")
+            if url.path == "/login":
+                return self._login_page()
+            if url.path == "/logout":
+                return self._send(303, b"", "text/plain", {
+                    "Location": "/login", "Set-Cookie": f"{COOKIE}=; Max-Age=0; Path=/"})
+            if not self._authed():
+                if url.path.startswith("/api/") or url.path.startswith("/files/"):
+                    return self._json({"error": "login required"}, 401)
+                return self._send(303, b"", "text/plain", {"Location": "/login"})
             if url.path in ("/", "/index.html"):
                 return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             if url.path == "/api/status":
                 return self._json({"status": app.status, "source": app.source.label,
-                                   "loaded_at": app.loaded_at, "job_count": len(app.jobs)})
+                                   "loaded_at": app.loaded_at, "job_count": len(app.jobs),
+                                   "protected": bool(_password())})
             if url.path == "/api/jobs":
                 return self._json(app.jobs_payload())
             if url.path.startswith("/files/"):
@@ -234,7 +305,21 @@ def make_handler(app: App):
 
         def do_POST(self):
             url = urlparse(self.path)
-            length = int(self.headers.get("Content-Length") or 0)
+            length = min(int(self.headers.get("Content-Length") or 0), 1_000_000)
+            if url.path == "/login":
+                form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+                given = (form.get("password") or [""])[0]
+                if _password() and hmac.compare_digest(given.encode("utf-8"), _password().encode("utf-8")):
+                    exp = int(time.time()) + SESSION_DAYS * 86400
+                    flags = "HttpOnly; SameSite=Lax; Path=/; Max-Age=%d" % (SESSION_DAYS * 86400)
+                    if self._secure():
+                        flags += "; Secure"
+                    return self._send(303, b"", "text/plain", {
+                        "Location": "/", "Set-Cookie": f"{COOKIE}={_sign(exp)}; {flags}"})
+                time.sleep(1.0)  # slow down guessing
+                return self._login_page("Wrong password.", 401)
+            if not self._authed():
+                return self._json({"error": "login required"}, 401)
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
             except ValueError:
@@ -256,10 +341,12 @@ def make_handler(app: App):
     return Handler
 
 
-def serve(source, port: int = 8765, open_browser: bool = True) -> None:
+def serve(source, port: int = 8765, open_browser: bool = True, host: str = "127.0.0.1") -> None:
+    if host not in ("127.0.0.1", "localhost") and not _password():
+        raise SystemExit("Refusing to listen on a public address without APPLYPILOT_UI_PASSWORD set.")
     app = App(source)
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app))
-    url = f"http://127.0.0.1:{port}/"
+    server = ThreadingHTTPServer((host, port), make_handler(app))
+    url = f"http://127.0.0.1:{port}/" if host in ("127.0.0.1", "0.0.0.0") else f"http://{host}:{port}/"
     print(f"ApplyPilot dashboard: {url}  (data: {source.label})")
     print("Press Ctrl+C to stop.")
     if open_browser:
@@ -279,10 +366,12 @@ def main(argv: list[str] | None = None) -> None:
     g = p.add_mutually_exclusive_group()
     g.add_argument("--gcs", help="Read from gs://BUCKET/PREFIX (e.g. gs://applypilot-jeevan-shortlist/applypilot)")
     g.add_argument("--dir", help="Read from a local shortlist folder (default ~/.applypilot/shortlist)")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
+    p.add_argument("--host", default="0.0.0.0" if os.environ.get("PORT") else "127.0.0.1",
+                   help="Address to listen on (Cloud Run sets PORT, which switches this to 0.0.0.0)")
     p.add_argument("--no-open", action="store_true", help="Don't open the browser")
     a = p.parse_args(argv)
 
     gcs = a.gcs or (os.environ.get("APPLYPILOT_GCS_URI", "").strip() if not a.dir else "")
     source = GCSSource(gcs) if gcs else LocalSource(Path(a.dir or Path.home() / ".applypilot" / "shortlist"))
-    serve(source, port=a.port, open_browser=not a.no_open)
+    serve(source, port=a.port, open_browser=not a.no_open and a.host == "127.0.0.1", host=a.host)

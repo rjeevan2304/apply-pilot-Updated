@@ -99,3 +99,54 @@ def test_status_file_written_by_export(tmp_path, monkeypatch):
     d = json.loads(p.read_text())
     assert d["running"] is False and d["stats"]["total"] == 2 and d["last_run_finished_at"]
     assert {r["region"]: r["strong"] for r in d["by_region"]} == {"India": 1, "UAE": 0}
+
+
+# -- password protection (hosted mode) ------------------------------------------------
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def _open(url, data=None, headers=None):
+    opener = urllib.request.build_opener(_NoRedirect)
+    req = urllib.request.Request(url, data=data, headers=headers or {})
+    try:
+        r = opener.open(req)
+        return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+
+
+def test_password_protects_everything(site, monkeypatch):
+    base, _, _ = site
+    monkeypatch.setenv("APPLYPILOT_UI_PASSWORD", "correct-horse")
+    assert _open(base + "/")[0] == 303
+    for path in ("/api/jobs", "/api/status", "/files/jobs/Acme%20-%20Analyst%20%5Babc123%5D/Resume.pdf"):
+        assert _open(base + path)[0] == 401
+    assert _open(base + "/api/decision", b'{"url":"u","decision":"apply"}',
+                 {"Content-Type": "application/json"})[0] == 401
+    assert _open(base + "/healthz")[0] == 200
+    assert _open(base + "/login", b"password=wrong")[0] == 401
+
+    code, headers, _ = _open(base + "/login", b"password=correct-horse", {"X-Forwarded-Proto": "https"})
+    cookie = headers["Set-Cookie"]
+    assert code == 303 and "HttpOnly" in cookie and "Secure" in cookie
+    session = cookie.split(";")[0]
+    assert _open(base + "/api/jobs", headers={"Cookie": session})[0] == 200
+    assert _open(base + "/api/jobs", headers={"Cookie": "ap_session=9999999999.forged"})[0] == 401
+
+    monkeypatch.setenv("APPLYPILOT_UI_PASSWORD", "changed-password")   # old sessions die
+    assert _open(base + "/api/jobs", headers={"Cookie": session})[0] == 401
+
+
+def test_no_password_needed_locally(site, monkeypatch):
+    base, _, _ = site
+    monkeypatch.delenv("APPLYPILOT_UI_PASSWORD", raising=False)
+    assert _open(base + "/api/jobs")[0] == 200
+
+
+def test_refuses_public_address_without_password(monkeypatch, tmp_path):
+    monkeypatch.delenv("APPLYPILOT_UI_PASSWORD", raising=False)
+    with pytest.raises(SystemExit, match="APPLYPILOT_UI_PASSWORD"):
+        ui.serve(ui.LocalSource(tmp_path), port=0, open_browser=False, host="0.0.0.0")
