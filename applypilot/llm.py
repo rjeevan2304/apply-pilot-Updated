@@ -409,6 +409,7 @@ def _is_hard_gemini_quota_error(resp: httpx.Response) -> bool:
 
 _MAX_RETRIES = 5
 _TIMEOUT = 120  # seconds
+_GEMINI_MIN_MAX_TOKENS = int(os.environ.get("GEMINI_MIN_MAX_TOKENS", "8192"))
 
 # kie.ai client: more patient retries, jittered backoff, bounded concurrency.
 _KIE_RETRIES = int(os.environ.get("KIE_RETRIES", "7"))
@@ -557,7 +558,11 @@ class LLMClient:
     def _handle_compat_response(resp: httpx.Response) -> str:
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"].get("content") or ""
+        if choice.get("finish_reason") == "length":
+            log.warning("LLM answer was cut off at the output-token limit (%d chars returned).", len(content))
+        return content
 
     # -- public API ---------------------------------------------------------
 
@@ -568,6 +573,11 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> str:
         """Send a chat completion request and return the assistant message text."""
+        # Gemini 2.5+ models think before answering, and on the OpenAI-compatible
+        # endpoint that thinking counts toward max_tokens; small limits (e.g. 2048
+        # for a tailored resume) can cut the answer off. Give them room.
+        if self._is_gemini:
+            max_tokens = max(max_tokens, _GEMINI_MIN_MAX_TOKENS)
         # Qwen3 optimization: prepend /no_think to skip chain-of-thought
         # reasoning, saving tokens on structured extraction tasks.
         if "qwen" in self.model.lower() and messages:
