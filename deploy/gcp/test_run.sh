@@ -32,7 +32,8 @@ done
 
 export APPLYPILOT_DIR="$TEST"
 cd "$REPO"
-exec "$REPO/.venv/bin/python" - "$GCS_URI" "$REAL/searches.yaml" <<'PY'
+# Not `exec`: keep this bash process (named test_run.sh) alive so `pgrep -af test_run` finds the test.
+"$REPO/.venv/bin/python" - "$GCS_URI" "$REAL/searches.yaml" <<'PY'
 import logging, os, sys, time
 from pathlib import Path
 
@@ -138,7 +139,8 @@ else:
         from applypilot.scoring.tailor import run_tailoring
         r = run_tailoring(min_score=min_score, limit=2)
         made = conn.execute("SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL").fetchone()[0]
-        done("Tailoring", made > 0, f"{made} tailored resume(s); result {r}")
+        done("Tailoring", made > 0, f"{made} tailored resume(s); outcomes {r.get('statuses', r)}"
+             + ("" if made else " - see the WARNING/ERROR lines above for why"))
     except Exception as e:
         done("Tailoring", False, str(e)[:300])
 
@@ -147,8 +149,11 @@ step("6/7  PDF resumes")
 try:
     from applypilot.scoring.pdf import batch_convert
     n = batch_convert()
-    pdfs = list((APP_DIR / "tailored_resumes").glob("*.pdf"))
-    done("PDFs", bool(pdfs) or not eligible, f"{len(pdfs)} PDF(s)")
+    pdfs = [f for f in (APP_DIR / "tailored_resumes").glob("*.pdf")
+            if f.stat().st_size > 1000 and f.read_bytes()[:5] == b"%PDF-"]
+    tailored_n = conn.execute("SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL").fetchone()[0]
+    done("PDFs", len(pdfs) >= tailored_n and (bool(pdfs) or not tailored_n),
+         f"{len(pdfs)} valid PDF(s) for {tailored_n} tailored resume(s)")
 except Exception as e:
     done("PDFs", False, str(e)[:300])
 

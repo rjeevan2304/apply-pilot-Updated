@@ -415,7 +415,10 @@ def tailor_resume(
         # Parse JSON from response
         try:
             data = extract_json(raw)
-        except ValueError:
+        except (ValueError, TypeError):
+            log.warning("Tailoring attempt %d: answer was not valid JSON (%d chars): %r ... %r",
+                        attempt + 1, len(raw or ""), (raw or "")[:120], (raw or "")[-80:])
+            report["last_error"] = "invalid JSON from LLM"
             avoid_notes.append("Output was not valid JSON. Return ONLY a JSON object, nothing else.")
             continue
 
@@ -499,6 +502,17 @@ def run_tailoring(min_score: int = 7, limit: int = 20,
         try:
             tailored, report = tailor_resume(resume_text, job, profile,
                                              validation_mode=validation_mode)
+
+            if not tailored.strip():
+                # Every attempt failed before producing a resume: save nothing
+                # (an empty file would become a broken PDF); retried next run.
+                log.error("%d/%d [NO RESUME] %s -- %s after %d attempt(s)", completed, len(jobs),
+                          job["title"][:40], report.get("last_error", report["status"]), report["attempts"])
+                result = {"url": job["url"], "title": job["title"], "site": job["site"],
+                          "status": "no_output", "attempts": report["attempts"], "path": None, "pdf_path": None}
+                results.append(result)
+                stats["no_output"] = stats.get("no_output", 0) + 1
+                continue
 
             # Build safe filename prefix
             prefix = job_file_prefix(job)
@@ -621,7 +635,9 @@ def run_tailoring(min_score: int = 7, limit: int = 20,
 
     return {
         "approved": stats.get("approved", 0),
-        "failed": stats.get("failed_validation", 0) + stats.get("failed_judge", 0),
+        "failed": (stats.get("failed_validation", 0) + stats.get("failed_judge", 0)
+                   + stats.get("exhausted_retries", 0) + stats.get("no_output", 0)),
         "errors": stats.get("error", 0),
+        "statuses": {k: v for k, v in stats.items() if v},
         "elapsed": elapsed,
     }

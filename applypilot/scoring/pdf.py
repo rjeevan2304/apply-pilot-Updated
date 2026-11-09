@@ -387,6 +387,8 @@ def convert_to_pdf(
     out = Path(out)
     render_pdf(html, str(out))
     if not out.exists() or out.stat().st_size <= 1000 or out.read_bytes()[:5] != b"%PDF-":
+        # Remove the broken file so it isn't exported and gets retried next time.
+        out.unlink(missing_ok=True)
         raise RuntimeError(f"PDF generation produced an invalid or empty file: {out}")
     log.info("PDF generated and validated: %s", out)
     return out
@@ -414,6 +416,7 @@ def batch_convert(limit: int = 50) -> int:
     candidates = [
         f for f in txt_files
         if not f.name.endswith("_JOB.txt")
+        and f.stat().st_size >= 200  # skip empty/failed outputs
     ]
 
     # Filter to those without a corresponding PDF
