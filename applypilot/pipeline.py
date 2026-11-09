@@ -27,6 +27,16 @@ from applypilot.database import init_db, get_connection, get_stats
 log = logging.getLogger(__name__)
 console = Console()
 
+# What the pipeline is doing right now (read by the status heartbeat / UI).
+PROGRESS: dict = {"stage": None, "detail": None, "stage_started_at": None}
+
+
+def _set_progress(stage: str | None = None, detail: str | None = None) -> None:
+    if stage is not None:
+        PROGRESS["stage"] = stage
+        PROGRESS["stage_started_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    PROGRESS["detail"] = detail
+
 
 # ---------------------------------------------------------------------------
 # Stage definitions
@@ -65,6 +75,7 @@ def _run_discover(workers: int = 1) -> dict:
 
     # JobSpy
     console.print("  [cyan]JobSpy full crawl...[/cyan]")
+    _set_progress(detail="Job boards (India)")
     try:
         from applypilot.discovery.jobspy import run_discovery
         run_discovery()
@@ -79,6 +90,7 @@ def _run_discover(workers: int = 1) -> dict:
     uae_cfg = load_uae_search_config()
     if uae_cfg:
         console.print("  [cyan]JobSpy UAE crawl...[/cyan]")
+        _set_progress(detail="Job boards (UAE)")
         try:
             from applypilot.discovery.jobspy import run_discovery
             run_discovery(uae_cfg)
@@ -90,6 +102,7 @@ def _run_discover(workers: int = 1) -> dict:
 
     # Workday corporate scraper
     console.print("  [cyan]Workday corporate scraper...[/cyan]")
+    _set_progress(detail="Workday career sites")
     try:
         from applypilot.discovery.workday import run_workday_discovery
         run_workday_discovery(workers=workers)
@@ -101,6 +114,7 @@ def _run_discover(workers: int = 1) -> dict:
 
     # Target companies' own job boards (companies.yaml)
     console.print("  [cyan]Target company job boards...[/cyan]")
+    _set_progress(detail="Target company job boards")
     try:
         from applypilot.discovery.companies import run_company_discovery
         res = run_company_discovery()
@@ -112,6 +126,7 @@ def _run_discover(workers: int = 1) -> dict:
 
     # Smart extract
     console.print("  [cyan]Smart extract (AI-powered scraping)...[/cyan]")
+    _set_progress(detail="Other job sites (smart extract)")
     try:
         from applypilot.discovery.smartextract import run_smart_extract
         run_smart_extract(workers=workers)
@@ -357,6 +372,7 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
 
     for name in ordered:
         meta = STAGE_META[name]
+        _set_progress(stage=name)
         console.print(f"\n{'=' * 70}")
         console.print(f"  [bold]STAGE: {name}[/bold] — {meta['desc']}")
         console.print(f"  Started: {datetime.now().strftime('%H:%M:%S')}")
