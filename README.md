@@ -62,6 +62,25 @@ Output (updated in place on every run):
     job.txt         apply link, why it fits, full job description
 ```
 
+### Target companies (remote roles open to India)
+
+Besides job-board searches, discovery pulls openings straight from a list of companies'
+own job boards (Greenhouse, Lever, Ashby, Workable, Atlassian), configured in
+[`applypilot/config/companies.yaml`](applypilot/config/companies.yaml). Copy it to
+`~/.applypilot/companies.yaml` to edit the list.
+
+Only roles someone in India can take are kept: India locations, or remote roles marked
+worldwide / global / APAC, or plain "Remote" with no region. Roles limited to other regions
+(US, EMEA, "Americas only", ...), senior titles, managers (except Product Manager) and
+non-engineering/product functions are dropped. These roles come with full descriptions, so
+they go straight to scoring and tailoring.
+
+```bash
+applypilot companies                 # show matching roles per company (nothing saved)
+applypilot companies --csv roles.csv # also write them to a CSV
+applypilot companies --save          # add them to the database now (cycle does this too)
+```
+
 `applypilot cycle` never submits applications. The `apply` command (Claude Code + Chrome
 auto-apply) is still there but isn't needed.
 

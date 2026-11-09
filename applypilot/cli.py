@@ -463,6 +463,62 @@ def cycle(
 
 
 @app.command()
+def companies(
+    all_levels: bool = typer.Option(False, "--all-levels", help="Don't drop senior/manager titles."),
+    csv_path: Optional[str] = typer.Option(None, "--csv", help="Also write the roles to this CSV file."),
+    save: bool = typer.Option(False, "--save", help="Store the roles in the database for scoring/tailoring."),
+) -> None:
+    """List open roles at your target companies (companies.yaml) that someone in India can take."""
+    _bootstrap()
+
+    import csv as _csv
+    from collections import defaultdict
+
+    from applypilot.discovery.companies import collect, companies_config_path, store_postings
+
+    console.print(f"[dim]Company list: {companies_config_path()}[/dim]")
+    postings, report = collect(all_levels=all_levels)
+
+    summary = Table(title="Target companies", header_style="bold cyan")
+    for col, just in (("Company", "left"), ("Board", "left"), ("Openings", "right"),
+                      ("Open to India", "right"), ("Matching roles", "right"), ("Note", "left")):
+        summary.add_column(col, justify=just)
+    for r in report:
+        note = r["error"] or ("no openings right now" if r["source"] and not r["total"] else "")
+        summary.add_row(r["company"], r["source"] or "-", str(r["total"]), str(r["eligible"]),
+                        str(r["kept"]), f"[yellow]{note}[/yellow]" if note else "")
+    console.print(summary)
+
+    by_company: dict[str, list] = defaultdict(list)
+    for p in postings:
+        by_company[p.company].append(p)
+    for name, items in by_company.items():
+        t = Table(title=f"{name} ({len(items)})", header_style="bold", title_justify="left")
+        t.add_column("Role")
+        t.add_column("Eligibility")
+        t.add_column("Link", overflow="fold")
+        for p in sorted(items, key=lambda x: (x.eligibility, x.title)):
+            t.add_row(p.title, p.eligibility, p.url)
+        console.print(t)
+
+    if csv_path:
+        from pathlib import Path
+        out = Path(csv_path).expanduser()
+        with out.open("w", newline="", encoding="utf-8") as fh:
+            w = _csv.writer(fh)
+            w.writerow(["company", "title", "eligibility", "location", "url", "apply_url", "posted_at"])
+            for p in postings:
+                w.writerow([p.company, p.title, p.eligibility, p.location, p.url, p.apply_url, p.posted_at or ""])
+        console.print(f"[green]Wrote {len(postings)} roles to[/green] {out}")
+
+    if save:
+        from applypilot.database import get_connection
+        new, existing = store_postings(get_connection(), postings)
+        console.print(f"[green]Saved:[/green] {new} new, {existing} already in the database. "
+                      "Run [bold]applypilot cycle[/bold] (or run score tailor pdf) to tailor resumes.")
+
+
+@app.command()
 def dashboard() -> None:
     """Generate and open the HTML dashboard in your browser."""
     _bootstrap()

@@ -8,7 +8,6 @@ search configuration YAML (searches.yaml) rather than being hardcoded.
 """
 
 import logging
-import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -17,6 +16,7 @@ from jobspy import scrape_jobs
 
 from applypilot import config
 from applypilot.database import get_connection, init_db, store_jobs
+from applypilot.discovery.filters import title_ok as _title_ok
 
 log = logging.getLogger(__name__)
 
@@ -119,14 +119,6 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 # -- DB storage (JobSpy DataFrame -> SQLite) ---------------------------------
 
 
-def _title_ok(title: str | None) -> bool:
-    """Exclude unrelated functions and senior roles; preserve Product Analyst."""
-    if title is None or str(title).strip().lower() in {'', 'nan', 'none'}: return False
-    value = re.sub(r'\s+', ' ', str(title)).strip().lower()
-    excluded = ('business analyst','strategy analyst','strategy consultant','management consultant','business operations analyst','business operations','program analyst','program manager','project manager','operations analyst','financial analyst','management analyst','account executive','recruiter','human resources','marketing ')
-    if any(term in value for term in excluded): return False
-    senior = (r'\b(senior|sr\.?|staff|lead|principal|director|head|vp|vice president|chief)\b' r'|\b(level|l)\s*(ii|iii|iv|2|3|4)\b' r'|\b(manager|engineer|analyst)\s+(ii|iii|iv)\b')
-    return re.search(senior, value) is None
 
 def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tuple[int, int]:
     """Store JobSpy DataFrame results into the DB. Returns (new, existing)."""
