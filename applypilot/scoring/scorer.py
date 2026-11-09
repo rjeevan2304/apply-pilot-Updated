@@ -167,6 +167,22 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         columns = jobs[0].keys()
         jobs = [dict(zip(columns, row)) for row in jobs]
 
+    # Titles the search filters would have dropped (senior/lead/director/intern/...)
+    # are marked skipped without an LLM call. They never reach the 7+ shortlist.
+    # Catches jobs found before these rules existed (e.g. from Workday).
+    from applypilot.discovery.filters import title_ok
+    skipped = [j for j in jobs if not title_ok(j.get("title"))]
+    if skipped:
+        conn.executemany(
+            "UPDATE jobs SET fit_score = 1, score_reasoning = ? WHERE url = ?",
+            [("\n(Skipped without an LLM call: senior/lead or excluded title.)", j["url"]) for j in skipped],
+        )
+        conn.commit()
+        log.info("Skipped %d job(s) by title without an LLM call", len(skipped))
+        jobs = [j for j in jobs if title_ok(j.get("title"))]
+    if not jobs:
+        return {"scored": 0, "skipped": len(skipped), "errors": 0, "elapsed": 0.0, "distribution": []}
+
     log.info("Scoring %d jobs sequentially...", len(jobs))
     t0 = time.time()
     completed = 0
@@ -230,6 +246,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     distribution = [(row[0], row[1]) for row in dist]
 
     return {
+        "skipped": len(skipped),
         "scored": len(results),
         "errors": errors,
         "quota_exhausted": quota_exhausted,

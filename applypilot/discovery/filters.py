@@ -15,5 +15,5 @@ def title_ok(title: str | None) -> bool:
     value = re.sub(r'\s+', ' ', str(title)).strip().lower()
     excluded = (r'\b(sales|sdr|bdr|account executive|business development|recruiter|recruitment|talent acquisition|human resources|hr|marketing|data entry|intern|interns|internship|trainee)\b',)
     if any(re.search(term, value) for term in excluded): return False
-    senior = (r'\b(senior|snr|sr\.?|staff|lead|principal|director|head|vp|vice president|chief)\b' r'|\b(level|l)\s*(ii|iii|iv|2|3|4)\b' r'|\b(manager|engineer|analyst)\s+(ii|iii|iv)\b')
+    senior = (r'\b(senior|snr|sr\.?|staff|lead|leader|leaders|leadership|principal|director|head|vp|avp|svp|evp|vice president|chief|distinguished|fellow)\b' r'|\b(level|l)\s*(ii|iii|iv|2|3|4)\b' r'|\b(manager|engineer|analyst)\s+(ii|iii|iv)\b')
     return re.search(senior, value) is None

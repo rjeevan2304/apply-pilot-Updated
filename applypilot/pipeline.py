@@ -617,7 +617,7 @@ def _process(min_score: int, validation_mode: str, cover: bool, score_batch: int
         if res.get("quota_exhausted"):
             totals["stopped_reason"] = "LLM quota/credit used up"
             break
-        if not res.get("scored"):
+        if not res.get("scored") and not res.get("skipped"):
             break  # nothing left to score (or every attempt failed)
 
     # Tailor any 7+ jobs still waiting (e.g. from earlier runs), batch by batch.

@@ -378,14 +378,16 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
     Returns:
         Tuple of (new_count, duplicate_count).
     """
+    from applypilot.discovery.filters import title_ok
+
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
 
     for job in jobs:
         url = job.get("url")
-        if not url:
-            continue
+        if not url or not title_ok(job.get("title")):
+            continue  # same title rules as the job boards (no senior/lead/intern/...)
         try:
             conn.execute(
                 "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at) "
