@@ -453,6 +453,19 @@ def _full_crawl(
 
     proxy_config = parse_proxy(proxy) if proxy else None
 
+    # Rotate: start where the previous run stopped, so a time budget never
+    # starves the queries at the end of the list.
+    offset_file = config.APP_DIR / f".search_offset_{(search_cfg.get('region') or 'india').lower()}"
+    offset = 0
+    if searches and search_cfg.get("rotate", True):
+        try:
+            offset = int(offset_file.read_text().strip()) % len(searches)
+        except (OSError, ValueError):
+            offset = 0
+        if offset:
+            log.info("Resuming search rotation at %d/%d", offset, len(searches))
+            searches = searches[offset:] + searches[:offset]
+
     log.info("Full crawl: %d search combinations", len(searches))
     log.info("Sites: %s | Results/site: %d | Hours old: %d",
              ", ".join(sites), results_per_site, hours_old)
@@ -521,6 +534,11 @@ def _full_crawl(
                          completed, len(searches), total_new, total_existing, total_errors)
     finally:
         jobspy_log.removeHandler(watch)
+        if searches and search_cfg.get("rotate", True):
+            try:
+                offset_file.write_text(str((offset + completed) % len(searches)))
+            except OSError:
+                log.debug("Could not save search rotation offset", exc_info=True)
 
     # Final stats
     conn = get_connection()

@@ -304,8 +304,8 @@ def title_matches(title: str, keywords: list[str], exclude: list[str] | None = N
     for word in exclude or []:
         if re.search(rf"\b{re.escape(word.lower())}\b", low):
             return False
-    # Managers are senior unless it's a product-manager track.
-    if re.search(r"\bmanager\b", low) and not re.search(r"\bproduct manager\b", low):
+    # Managers are senior unless it's a product/program/project-manager track.
+    if re.search(r"\bmanager\b", low) and not re.search(r"\b(product|program|project) manager\b", low):
         return False
     if not keywords:
         return True

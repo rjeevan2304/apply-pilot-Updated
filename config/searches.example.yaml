@@ -65,6 +65,34 @@ queries:
   tier: 2
 - query: Applied AI Engineer
   tier: 2
+- query: Forward Deployed Engineer
+  tier: 1
+- query: Solutions Engineer
+  tier: 1
+- query: Software Development Engineer
+  tier: 1
+- query: Business Analyst
+  tier: 1
+- query: Generative AI Engineer
+  tier: 2
+- query: Machine Learning Engineer
+  tier: 2
+- query: Implementation Engineer
+  tier: 2
+- query: SDET
+  tier: 2
+- query: Data Analyst
+  tier: 2
+- query: Associate Program Manager
+  tier: 2
+- query: Technical Program Manager
+  tier: 2
+- query: Technical Consultant
+  tier: 2
+- query: Customer Success Engineer
+  tier: 2
+- query: Developer Advocate
+  tier: 2
 location_accept: &id001
 - Hyderabad
 - Bengaluru
@@ -91,3 +119,6 @@ exclude_titles:
 - Project Manager
 - Operations Analyst
 - Financial Analyst
+# Stop searching after this many minutes so the run moves on to scoring and
+# tailoring; the next run continues with the searches that were skipped.
+time_budget_minutes: 180
