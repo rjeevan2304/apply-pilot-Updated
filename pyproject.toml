@@ -9,6 +9,7 @@ description = "AI-powered end-to-end job application pipeline (customized fork)"
 license = "AGPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
+  "anthropic>=2.6",
   "beautifulsoup4>=4.12",
   "httpx>=0.24",
   "pandas>=2.0",

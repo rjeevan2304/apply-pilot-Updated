@@ -216,7 +216,7 @@ TIER_COMMANDS: dict[int, list[str]] = {
 
 def _has_llm_configured() -> bool:
     """True if any LLM backend is configured (API key, local URL, or Claude CLI)."""
-    if any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "KIE_API_KEY")):
+    if any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "KIE_API_KEY", "ANTHROPIC_API_KEY")):
         return True
     return (
         os.environ.get("LLM_PROVIDER", "").strip().lower() == "claude_cli"

@@ -586,6 +586,12 @@ def doctor() -> None:
     elif has_gemini:
         model = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
         results.append(("LLM API key", ok_mark, f"Gemini ({model})"))
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            cm = os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-opus-5-5"
+            results.append(("LLM fallback", ok_mark, f"Claude API ({cm}) when Gemini is limited"))
+    elif os.environ.get("ANTHROPIC_API_KEY") and not (has_openai or has_local):
+        cm = os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-opus-5-5"
+        results.append(("LLM API key", ok_mark, f"Claude API ({cm})"))
     elif has_openai:
         model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
         results.append(("LLM API key", ok_mark, f"OpenAI ({model})"))
