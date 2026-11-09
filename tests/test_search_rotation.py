@@ -58,17 +58,3 @@ def test_company_boards_allow_program_and_project_managers():
     assert title_matches("Technical Program Manager", kw)
     assert title_matches("Associate Project Manager", ["project"])
     assert not title_matches("Engineering Manager", kw)
-
-
-def test_tier_one_searched_first(monkeypatch, tmp_path):
-    cfg = {"queries": [{"query": "T2a", "tier": 2}, {"query": "T1", "tier": 1}, {"query": "T2b", "tier": 2}],
-           "locations": [{"location": "Hyderabad"}]}
-    assert run(monkeypatch, tmp_path, cfg, 3) == ["T1", "T2a", "T2b"]
-
-
-def test_rotation_restarts_when_search_list_changes(monkeypatch, tmp_path):
-    cfg = {"queries": [{"query": q, "tier": 1} for q in "ABCD"], "locations": [{"location": "X"}]}
-    assert run(monkeypatch, tmp_path, cfg, 2) == ["A", "B"]
-    cfg["queries"].append({"query": "E", "tier": 1})      # list changed -> start from the top
-    assert run(monkeypatch, tmp_path, cfg, 2) == ["A", "B"]
-    assert run(monkeypatch, tmp_path, cfg, 2) == ["C", "D"]

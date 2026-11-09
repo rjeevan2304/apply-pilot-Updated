@@ -167,29 +167,6 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         columns = jobs[0].keys()
         jobs = [dict(zip(columns, row)) for row in jobs]
 
-    # Pre-check without the LLM: postings asking for 5+ years are capped at 3 by
-    # the years rule anyway, so they can never reach the shortlist. Record that
-    # score directly and save the LLM call (and the free-tier quota).
-    now = datetime.now(timezone.utc).isoformat()
-    remaining = []
-    skipped = 0
-    for job in jobs:
-        yrs = min_years_required(job.get("title"), job.get("url"), job.get("full_description"))
-        if yrs is not None and yrs >= 5:
-            conn.execute(
-                "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
-                (3, f"\n(No LLM call: posting asks for {yrs}+ years; capped at 3.)", now, job["url"]),
-            )
-            skipped += 1
-        else:
-            remaining.append(job)
-    if skipped:
-        conn.commit()
-        log.info("Pre-check: %d job(s) ask for 5+ years -> scored 3 without an LLM call", skipped)
-    jobs = remaining
-    if not jobs:
-        return {"scored": skipped, "errors": 0, "elapsed": 0.0, "distribution": [], "prechecked": skipped}
-
     log.info("Scoring %d jobs sequentially...", len(jobs))
     t0 = time.time()
     completed = 0

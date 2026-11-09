@@ -453,22 +453,14 @@ def _full_crawl(
 
     proxy_config = parse_proxy(proxy) if proxy else None
 
-    # Highest-priority titles first (tier 1, then 2, ...), keeping file order within a tier.
-    searches.sort(key=lambda s: s.get("tier") or 99)
-
     # Rotate: start where the previous run stopped, so a time budget never
     # starves the queries at the end of the list.
     offset_file = config.APP_DIR / f".search_offset_{(search_cfg.get('region') or 'india').lower()}"
     offset = 0
-    import hashlib
-    order_sig = hashlib.sha1("|".join(f"{s['query']}@{s['location']}" for s in searches)
-                             .encode("utf-8")).hexdigest()[:12]
     if searches and search_cfg.get("rotate", True):
         try:
-            saved = offset_file.read_text().split()
-            # Only resume if the search list is unchanged; otherwise start from the top.
-            offset = int(saved[0]) % len(searches) if saved[1:2] == [order_sig] else 0
-        except (OSError, ValueError, IndexError):
+            offset = int(offset_file.read_text().strip()) % len(searches)
+        except (OSError, ValueError):
             offset = 0
         if offset:
             log.info("Resuming search rotation at %d/%d", offset, len(searches))
@@ -544,7 +536,7 @@ def _full_crawl(
         jobspy_log.removeHandler(watch)
         if searches and search_cfg.get("rotate", True):
             try:
-                offset_file.write_text(f"{(offset + completed) % len(searches)} {order_sig}")
+                offset_file.write_text(str((offset + completed) % len(searches)))
             except OSError:
                 log.debug("Could not save search rotation offset", exc_info=True)
 
