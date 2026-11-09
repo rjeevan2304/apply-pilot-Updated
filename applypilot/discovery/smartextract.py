@@ -12,6 +12,7 @@ Sites are loaded from config/sites.yaml, with {query_encoded} and {location_enco
 placeholders replaced from the user's search configuration.
 """
 
+import os
 import json
 import logging
 import re
@@ -867,7 +868,12 @@ def _run_one_site(name: str, url: str) -> dict:
     _captcha_signals = ["captcha", "are you a human", "verify you", "unusual requests",
                         "access denied", "please verify", "bot detection"]
     _is_captcha = any(s in full_html.lower() for s in _captcha_signals) if full_html else False
-    if len(cleaned_check) < 5000 and full_html and not _is_captcha:
+    # A visible browser needs a display; servers/VMs have none (no $DISPLAY).
+    _can_headful = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) or sys.platform in ("darwin", "win32")
+    if len(cleaned_check) < 5000 and full_html and not _is_captcha and not _can_headful:
+        log.info("Cleaned HTML only %s chars -- no display available, skipping headful retry",
+                 f"{len(cleaned_check):,}")
+    elif len(cleaned_check) < 5000 and full_html and not _is_captcha:
         log.info("Cleaned HTML only %s chars -- retrying headful...", f"{len(cleaned_check):,}")
         intel = collect_page_intelligence(url, headless=False)
         collect_time = time.time() - t0

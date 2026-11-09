@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from applypilot.config import RESUME_PATH, TAILORED_DIR, load_profile
-from applypilot.database import get_connection, get_jobs_by_stage
+from applypilot.database import job_company, job_file_prefix, get_connection, get_jobs_by_stage
 from applypilot.llm import ClaudeCLIError, get_client
 from applypilot.scoring.validator import (
     BANNED_WORDS,
@@ -381,7 +381,7 @@ def tailor_resume(
     """
     job_text = (
         f"TITLE: {job['title']}\n"
-        f"COMPANY: {job['site']}\n"
+        f"COMPANY: {job_company(job)}\n"
         f"LOCATION: {job.get('location', 'N/A')}\n\n"
         f"DESCRIPTION:\n{(job.get('full_description') or '')[:6000]}"
     )
@@ -501,9 +501,7 @@ def run_tailoring(min_score: int = 7, limit: int = 20,
                                              validation_mode=validation_mode)
 
             # Build safe filename prefix
-            safe_title = re.sub(r"[^\w\s-]", "", job["title"])[:50].strip().replace(" ", "_")
-            safe_site = re.sub(r"[^\w\s-]", "", job["site"])[:20].strip().replace(" ", "_")
-            prefix = f"{safe_site}_{safe_title}"
+            prefix = job_file_prefix(job)
 
             # Save tailored resume text
             txt_path = TAILORED_DIR / f"{prefix}.txt"
@@ -513,7 +511,7 @@ def run_tailoring(min_score: int = 7, limit: int = 20,
             job_path = TAILORED_DIR / f"{prefix}_JOB.txt"
             job_desc = (
                 f"Title: {job['title']}\n"
-                f"Company: {job['site']}\n"
+                f"Company: {job_company(job)}\n"
                 f"Location: {job.get('location', 'N/A')}\n"
                 f"Score: {job.get('fit_score', 'N/A')}\n"
                 f"URL: {job['url']}\n\n"

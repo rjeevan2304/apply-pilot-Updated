@@ -5,6 +5,7 @@ pipeline stage are created up front so any stage can run independently
 without migration ordering issues.
 """
 
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -151,6 +152,7 @@ _ALL_COLUMNS: dict[str, str] = {
     "description": "TEXT",
     "location": "TEXT",
     "site": "TEXT",
+    "company": "TEXT",
     "strategy": "TEXT",
     "discovered_at": "TEXT",
     # Enrichment
@@ -181,6 +183,26 @@ _ALL_COLUMNS: dict[str, str] = {
     "apply_task_id": "TEXT",
     "verification_confidence": "TEXT",
 }
+
+
+def job_company(job: dict) -> str:
+    """Return the employer name for a job.
+
+    JobSpy jobs store the employer in ``company`` and the job board in
+    ``site``. Workday/smart-extract jobs only set ``site`` (which already holds
+    the employer or site name), so fall back to it.
+    """
+    return (job.get("company") or job.get("site") or "Unknown").strip()
+
+
+def job_file_prefix(job: dict) -> str:
+    """Filesystem-safe, collision-resistant prefix: Company_Title_<urlhash>."""
+    import hashlib
+
+    safe_title = re.sub(r"[^\w\s-]", "", job.get("title") or "")[:50].strip().replace(" ", "_")
+    safe_company = re.sub(r"[^\w\s-]", "", job_company(job))[:30].strip().replace(" ", "_")
+    digest = hashlib.sha1((job.get("url") or "").encode("utf-8")).hexdigest()[:6]
+    return f"{safe_company}_{safe_title}_{digest}"
 
 
 def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:

@@ -40,11 +40,70 @@ Then fill in `profile.json` (personal details, skills, resume facts), edit `sear
 
 Personal data (profile, resume, database, logs, tailored resumes) is never committed — see `.gitignore`.
 
-## Usage
+## Usage: shortlist + tailored resumes (apply manually)
+
+This fork is set up to **find jobs and tailor resumes only**; you apply yourself.
 
 ```bash
-applypilot --help
+applypilot cycle                 # discover -> enrich -> score -> tailor -> pdf -> export
+applypilot export                # just refresh the shortlist from what's already done
+applypilot export --min-score 6  # include weaker matches
 ```
+
+Output (updated in place on every run):
+
+```
+~/.applypilot/shortlist/
+  shortlist.csv     company, title, location, score, apply_url, ... (open in Sheets/Excel)
+  shortlist.md      same list as a table
+  jobs/<Company - Title [id]>/
+    Resume.pdf      tailored resume for this job
+    Cover_Letter.*  only with `cycle --cover`
+    job.txt         apply link, why it fits, full job description
+```
+
+`applypilot cycle` never submits applications. The `apply` command (Claude Code + Chrome
+auto-apply) is still there but isn't needed.
+
+## Running on a Google Cloud VM
+
+Everything runs headless; no display or local machine needed.
+
+1. Create a Compute Engine VM (Debian 12 or Ubuntu 24.04; e2-small is enough). If you want
+   the CSV in Cloud Storage too, give the VM's service account **Storage Object Admin** on
+   your bucket and set the VM's access scope for Storage to **Read Write**.
+2. On the VM:
+
+   ```bash
+   git clone https://github.com/rjeevan2304/apply-pilot-Updated.git
+   cd apply-pilot-Updated
+   bash deploy/gcp/setup.sh gs://YOUR_BUCKET/applypilot   # bucket is optional
+   ```
+
+   This installs dependencies and headless Chromium, creates `~/.applypilot/`, and enables a
+   systemd timer that runs `applypilot cycle` every 6 hours (missed runs catch up after a reboot).
+3. Fill in `~/.applypilot/profile.json`, `resume.txt`, `searches.yaml` and `.env`
+   (`GEMINI_API_KEY=...`), then start a first run:
+
+   ```bash
+   sudo systemctl start applypilot-cycle.service
+   journalctl -fu applypilot-cycle
+   ```
+
+Where the results are:
+
+- On the VM: `~/.applypilot/shortlist/shortlist.csv`. Fetch it with
+  `gcloud compute scp VM_NAME:~/.applypilot/shortlist/shortlist.csv .`
+- In Cloud Storage (if configured): `gs://YOUR_BUCKET/applypilot/shortlist.csv` plus each job's
+  folder. Browse it in the Cloud Console, or `gcloud storage cp -r gs://YOUR_BUCKET/applypilot .`
+
+Settings: change the bucket or add flags (`--min-score 6`, `--cover`, `--workers 2`) in
+`/etc/default/applypilot`; change the schedule in
+`/etc/systemd/system/applypilot-cycle.timer` and then run `sudo systemctl daemon-reload`.
+`shortlist.csv` is regenerated each run, so keep your own "applied" notes in a copy
+(e.g. a Google Sheet that imports it), not in the file itself.
+
+Without systemd (e.g. inside `tmux`): `applypilot cycle --loop-hours 6 --gcs gs://YOUR_BUCKET/applypilot`.
 
 ## License
 
