@@ -78,6 +78,7 @@ def export_shortlist(
     min_score: int = 7,
     output_dir: Path | None = None,
     copy_files: bool = True,
+    write_status: bool = True,
 ) -> dict:
     """Write the shortlist and return {"count", "dir", "csv", "markdown", "records"}."""
     conn = get_connection()
@@ -172,12 +173,14 @@ def export_shortlist(
     md_path = out / "shortlist.md"
     _atomic_write(md_path, "\n".join(lines) + "\n")
 
-    # Pipeline snapshot for the local dashboard (`applypilot ui`).
-    try:
-        from applypilot.statusfile import write_status
-        write_status(out, running=False)
-    except Exception:
-        log.warning("Could not write status.json", exc_info=True)
+    # Pipeline snapshot for the dashboard (`applypilot ui`). Mid-run publishes
+    # skip this: the cycle's heartbeat keeps status.json at "running".
+    if write_status:
+        try:
+            from applypilot.statusfile import write_status as _write_status
+            _write_status(out, running=False)
+        except Exception:
+            log.warning("Could not write status.json", exc_info=True)
 
     return {"count": len(records), "dir": out, "csv": csv_path, "markdown": md_path,
             "records": records}

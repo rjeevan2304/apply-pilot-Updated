@@ -334,7 +334,7 @@ def _gcs_uri(gcs: Optional[str]) -> str:
 
 
 def _do_export(min_score: int, output: Optional[str], no_copy: bool, gcs: Optional[str],
-               quiet: bool = False) -> int:
+               quiet: bool = False, write_status: bool = True) -> int:
     """Export the shortlist (and optionally sync to GCS). Returns job count."""
     from pathlib import Path
 
@@ -344,6 +344,7 @@ def _do_export(min_score: int, output: Optional[str], no_copy: bool, gcs: Option
         min_score=min_score,
         output_dir=Path(output).expanduser() if output else None,
         copy_files=not no_copy,
+        write_status=write_status,
     )
 
     if not quiet and result["records"]:
@@ -454,10 +455,12 @@ def cycle(
         help="Repeat forever every N hours (0 = run once; use with systemd/cron instead if possible).",
     ),
 ) -> None:
-    """Headless run for servers: discover -> enrich -> score -> tailor -> pdf -> export.
+    """Headless run for servers. Never applies to anything.
 
-    Never applies to anything. Safe to run from cron/systemd; overlapping runs
-    are prevented with a lock file.
+    Order: India job boards -> UAE job boards -> target companies -> details ->
+    score in batches (tailor, PDF and publish the shortlist after each batch) ->
+    other job sites -> Workday (last, no time limit) -> process those the same way.
+    Everything is saved as it happens. Overlapping runs are prevented with a lock file.
     """
     import fcntl
     import time as _time
@@ -465,7 +468,7 @@ def cycle(
     _bootstrap()
 
     from applypilot.config import APP_DIR, check_tier
-    from applypilot.pipeline import run_pipeline
+    from applypilot.pipeline import run_cycle
 
     check_tier(2, "AI scoring/tailoring")
     _gcs_uri(gcs)  # fail fast on a bad bucket address before hours of work
@@ -476,7 +479,6 @@ def cycle(
         console.print("[red]Missing required file(s):[/red] " + ", ".join(missing))
         console.print("Copy config/profile.example.json and your resume.txt there first (see README).")
         raise typer.Exit(code=1)
-    stages = ["discover", "enrich", "score", "tailor"] + (["cover"] if cover else []) + ["pdf"]
 
     lock_file = open(APP_DIR / ".cycle.lock", "w")
     try:
@@ -487,13 +489,19 @@ def cycle(
 
     while True:
         started = _time.time()
-        log.info("Cycle start: stages=%s", ",".join(stages))
+        log.info("Cycle start")
         heartbeat = _StatusHeartbeat(output, gcs)
         heartbeat.start()
+
+        def publish(hb=heartbeat) -> None:
+            """Mid-run: update shortlist.csv, resumes and the bucket; keep status 'running'."""
+            _do_export(min_score, output, no_copy=False, gcs=gcs, quiet=True, write_status=False)
+            hb._write()
+
         try:
-            result = run_pipeline(
-                stages=stages, min_score=min_score, workers=workers,
-                validation_mode=validation,
+            result = run_cycle(
+                min_score=min_score, workers=workers, validation_mode=validation,
+                cover=cover, publish=publish,
             )
             if result.get("errors"):
                 log.warning("Some stages reported errors: %s", result.get("errors"))

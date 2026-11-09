@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 
 from applypilot.config import COVER_LETTER_DIR, RESUME_PATH, load_profile
-from applypilot.database import job_company, job_file_prefix, get_connection, get_jobs_by_stage
+from applypilot.database import SavingList, job_company, job_file_prefix, get_connection, get_jobs_by_stage
 from applypilot.llm import get_client
 from applypilot.scoring.validator import (
     BANNED_WORDS,
@@ -228,7 +228,22 @@ def run_cover_letters(min_score: int = 7, limit: int = 20,
     )
     t0 = time.time()
     completed = 0
-    results: list[dict] = []
+    def _save_letter(r: dict) -> None:
+        """Save one cover letter outcome right away (survives interruptions)."""
+        if r.get("path"):
+            conn.execute(
+                "UPDATE jobs SET cover_letter_path=?, cover_letter_at=?, "
+                "cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
+                (r["path"], datetime.now(timezone.utc).isoformat(), r["url"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs SET cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
+                (r["url"],),
+            )
+        conn.commit()
+
+    results: list[dict] = SavingList(_save_letter)
     error_count = 0
 
     for job in jobs:
@@ -275,23 +290,8 @@ def run_cover_letters(min_score: int = 7, limit: int = 20,
             results.append(result)
             log.error("%d/%d [ERROR] %s -- %s", completed, len(jobs), job["title"][:40], e)
 
-    # Persist to DB: increment attempt counter for ALL, save path only for successes
-    now = datetime.now(timezone.utc).isoformat()
-    saved = 0
-    for r in results:
-        if r.get("path"):
-            conn.execute(
-                "UPDATE jobs SET cover_letter_path=?, cover_letter_at=?, "
-                "cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
-                (r["path"], now, r["url"]),
-            )
-            saved += 1
-        else:
-            conn.execute(
-                "UPDATE jobs SET cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
-                (r["url"],),
-            )
-    conn.commit()
+    # (Each letter's outcome was saved as soon as it finished.)
+    saved = sum(1 for r in results if r.get("path"))
 
     elapsed = time.time() - t0
     log.info("Cover letters done in %.1fs: %d generated, %d errors", elapsed, saved, error_count)

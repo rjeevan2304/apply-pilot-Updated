@@ -391,8 +391,12 @@ def scrape_employers(
     accept_locs: list[str] | None = None,
     reject_locs: list[str] | None = None,
     workers: int = 1,
+    on_employer_done=None,
 ) -> dict:
     """Run full scrape: search -> filter -> detail -> store.
+
+    on_employer_done(n) is called after each employer finishes (n = how many of
+    employer_keys are done), so callers can record progress for resuming.
 
     Sequential by default. When workers > 1, processes employers in parallel
     using ThreadPoolExecutor.
@@ -430,6 +434,8 @@ def scrape_employers(
             for future in as_completed(futures):
                 result = future.result()
                 completed += 1
+                if on_employer_done:
+                    on_employer_done(completed)
                 total_new += result["new"]
                 total_existing += result["existing"]
                 total_found += result["found"]
@@ -449,6 +455,8 @@ def scrape_employers(
                 location_filter, accept_locs, reject_locs,
             )
             completed += 1
+            if on_employer_done:
+                on_employer_done(completed)
             total_new += result["new"]
             total_existing += result["existing"]
             total_found += result["found"]
@@ -518,19 +526,51 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
     grand_existing = 0
     grand_found = 0
 
-    for i, query in enumerate(queries, 1):
-        log.info("Query %d/%d: \"%s\"", i, len(queries), query)
+    # Resume where the previous (interrupted) Workday crawl stopped. Progress is
+    # "query_index employer_index signature"; a changed query/employer list restarts.
+    import hashlib
+    keys = list(employers.keys())
+    sig = hashlib.sha1(("|".join(queries) + "#" + "|".join(keys)).encode("utf-8")).hexdigest()[:12]
+    state_file = config.APP_DIR / ".workday_progress"
+    start_q = start_e = 0
+    try:
+        saved = state_file.read_text().split()
+        if saved[2:3] == [sig]:
+            start_q, start_e = int(saved[0]), int(saved[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    if start_q >= len(queries):
+        start_q = start_e = 0
+    if start_q or start_e:
+        log.info("Resuming Workday crawl at query %d/%d, employer %d/%d",
+                 start_q + 1, len(queries), start_e + 1, len(keys))
+
+    def save(q: int, e: int) -> None:
+        try:
+            state_file.write_text(f"{q} {e} {sig}")
+        except OSError:
+            log.debug("Could not save Workday progress", exc_info=True)
+
+    for i in range(start_q, len(queries)):
+        query = queries[i]
+        skip = start_e if i == start_q else 0
+        log.info("Query %d/%d: \"%s\"", i + 1, len(queries), query)
         result = scrape_employers(
             search_text=query,
             employers=employers,
+            employer_keys=keys[skip:],
             location_filter=location_filter,
             accept_locs=accept_locs,
             reject_locs=reject_locs,
             workers=workers,
+            on_employer_done=lambda n, i=i, skip=skip: save(i, skip + n),
         )
+        save(i + 1, 0)
         grand_new += result["new"]
         grand_existing += result["existing"]
         grand_found += result["found"]
+
+    save(0, 0)  # full pass done: next run starts from the top
 
     log.info("Workday crawl done: %d found, %d new, %d existing across %d queries x %d employers",
              grand_found, grand_new, grand_existing, len(queries), len(employers))
