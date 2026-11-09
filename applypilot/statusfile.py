@@ -32,6 +32,17 @@ def build_status(running: bool, run_started_at: str | None = None,
         "FROM jobs GROUP BY r ORDER BY r"
     ).fetchall()
 
+    def recent(where: str, order: str, limit: int) -> list[dict]:
+        try:
+            rows = conn.execute(
+                f"SELECT title, COALESCE(company, site) AS company, COALESCE(region, 'India') AS region, "
+                f"fit_score, {order} AS at FROM jobs WHERE {where} ORDER BY {order} DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        except Exception:
+            return []
+        return [{"title": r[0], "company": r[1], "region": r[2], "score": r[3], "at": r[4]} for r in rows]
+
     progress: dict = {}
     if running:
         try:
@@ -53,6 +64,8 @@ def build_status(running: bool, run_started_at: str | None = None,
             k: (list(map(list, v)) if isinstance(v, (list, tuple)) else v)
             for k, v in stats.items()
         },
+        "recent_scored": recent("scored_at IS NOT NULL", "scored_at", 20),
+        "recent_tailored": recent("tailored_at IS NOT NULL", "tailored_at", 10),
         "by_region": [
             {"region": r[0], "total": r[1], "scored": r[2] or 0, "strong": r[3] or 0, "tailored": r[4] or 0}
             for r in by_region

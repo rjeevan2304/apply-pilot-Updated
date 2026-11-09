@@ -393,11 +393,14 @@ def export(
 class _StatusHeartbeat:
     """Refresh status.json (and its copy in the bucket) while a cycle runs.
 
-    Writes every 5 minutes, and within ~30 s of a stage change, so the local
-    dashboard can show what the run is doing. Never interrupts the run.
+    Writes every 2 minutes, and within ~30 s of a stage change, so the
+    dashboard can show what the run is doing. If a `publish` callback is set,
+    also republishes the shortlist every 10 minutes when new tailored resumes
+    exist (e.g. in the middle of a long tailoring batch). Never interrupts the run.
     """
 
-    def __init__(self, output: Optional[str], gcs: Optional[str], every: float = 300.0) -> None:
+    def __init__(self, output: Optional[str], gcs: Optional[str], every: float = 120.0,
+                 publish_every: float = 600.0) -> None:
         import threading
         from datetime import datetime
         from pathlib import Path
@@ -407,6 +410,9 @@ class _StatusHeartbeat:
         self.dir = Path(output).expanduser() if output else default_export_dir()
         self.gcs = _gcs_uri(gcs)
         self.every = every
+        self.publish_every = publish_every
+        self.publish = None          # set by `cycle`; called under self.publish_lock
+        self.publish_lock = threading.Lock()
         self.started_at = datetime.now().astimezone().isoformat(timespec="seconds")
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="status-heartbeat", daemon=True)
@@ -421,17 +427,35 @@ class _StatusHeartbeat:
         except Exception:
             log.debug("Status heartbeat failed", exc_info=True)
 
+    def _tailored_count(self) -> int:
+        try:
+            from applypilot.database import get_stats
+            return int(get_stats().get("tailored") or 0)
+        except Exception:
+            return -1
+
     def _loop(self) -> None:
+        import time as _t
         from applypilot.pipeline import PROGRESS
 
         last_key = None
         last_write = 0.0
+        last_publish = _t.time()
+        published_count = self._tailored_count()
         while not self._stop.is_set():
             key = (PROGRESS.get("stage"), PROGRESS.get("detail"))
-            import time as _t
             if key != last_key or _t.time() - last_write >= self.every:
                 self._write()
                 last_key, last_write = key, _t.time()
+            if self.publish and _t.time() - last_publish >= self.publish_every:
+                count = self._tailored_count()
+                if count > published_count:
+                    try:
+                        self.publish()
+                        published_count = count
+                    except Exception:
+                        log.debug("Periodic publish failed", exc_info=True)
+                last_publish = _t.time()
             self._stop.wait(30)
 
     def start(self) -> None:
@@ -495,8 +519,11 @@ def cycle(
 
         def publish(hb=heartbeat) -> None:
             """Mid-run: update shortlist.csv, resumes and the bucket; keep status 'running'."""
-            _do_export(min_score, output, no_copy=False, gcs=gcs, quiet=True, write_status=False)
-            hb._write()
+            with hb.publish_lock:
+                _do_export(min_score, output, no_copy=False, gcs=gcs, quiet=True, write_status=False)
+                hb._write()
+
+        heartbeat.publish = publish
 
         try:
             result = run_cycle(

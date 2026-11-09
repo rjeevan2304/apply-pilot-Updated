@@ -144,3 +144,20 @@ def test_cycle_stops_scoring_when_quota_is_used_up(monkeypatch):
     monkeypatch.setattr("applypilot.scoring.tailor.run_tailoring", lambda **k: {"approved": 0})
     res = pipeline._process(7, "normal", False, 50, lambda: None, "test")
     assert len(calls) == 1 and "quota" in res["stopped_reason"]
+
+
+def test_heartbeat_republishes_when_new_resumes_appear(monkeypatch, tmp_path):
+    import time
+    from applypilot import cli
+
+    counts = iter([0, 0, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
+    hb = cli._StatusHeartbeat(str(tmp_path), None, every=0.01, publish_every=0.01)
+    monkeypatch.setattr(hb, "_write", lambda: None)
+    monkeypatch.setattr(hb, "_tailored_count", lambda: next(counts, 2))
+    monkeypatch.setattr(hb._stop, "wait", lambda t: time.sleep(0.02))
+    published = []
+    hb.publish = lambda: published.append(1)
+    hb.start()
+    time.sleep(0.5)
+    hb.stop()
+    assert 1 <= len(published) <= 2      # only when the count went up, not every tick

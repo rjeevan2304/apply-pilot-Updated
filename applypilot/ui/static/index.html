@@ -19,6 +19,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -122,6 +123,11 @@
       <div class="card"><h2>Jobs by source</h2><table id="sources"></table></div>
       <div class="card"><h2>By region</h2><table id="regions"></table></div>
     </div>
+    <div class="grid" style="margin-top:16px">
+      <div class="card"><h2>Latest scored <span class="muted" style="font-weight:400">(all scores)</span></h2><table id="recentScored"></table></div>
+      <div class="card"><h2>Latest tailored resumes</h2><table id="recentTailored"></table></div>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:12px">Updates by itself every 2 minutes during a run (the VM publishes every few minutes).</p>
   </section>
 
   <!-- JOBS -->
@@ -213,15 +219,23 @@ async function loadStatus() {
       reg.map(r => `<tr><td>${esc(r.region)}</td><td class="num">${r.total}</td><td class="num">${r.scored}</td><td class="num">${r.strong}</td><td class="num">${r.tailored}</td></tr>`).join("")
     : `<tr><td class="muted">—</td></tr>`;
   document.getElementById("jobcount").textContent = d.job_count ? `(${d.job_count})` : "";
+  const scoreCls = n => n >= 7 ? "var(--green)" : n >= 5 ? "var(--yellow)" : "var(--red)";
+  const recentRows = (items, empty) => items && items.length
+    ? items.map(r => `<tr><td><span class="score" style="color:${scoreCls(r.score)}">${esc(r.score ?? "—")}</span></td>
+        <td><b>${esc(r.company)}</b> — ${esc(r.title)}<div class="muted" style="font-size:12px">${esc(r.region)} · ${ago(r.at) || fmt(r.at)}</div></td></tr>`).join("")
+    : `<tr><td class="muted">${empty}</td></tr>`;
+  document.getElementById("recentScored").innerHTML = recentRows(s.recent_scored, "Nothing scored yet.");
+  document.getElementById("recentTailored").innerHTML = recentRows(s.recent_tailored, "No resumes yet.");
 }
 
-async function loadJobs() {
+async function loadJobs(keepDetail) {
   JOBS = await getJSON("/api/jobs");
   const regions = [...new Set(JOBS.map(j => j.region).filter(Boolean))].sort();
   const sel = document.getElementById("region"), cur = sel.value;
   sel.innerHTML = `<option value="">All regions</option>` + regions.map(r => `<option ${r === cur ? "selected" : ""}>${esc(r)}</option>`).join("");
   renderJobs();
-  if (SEL) { const j = JOBS.find(x => x.job_url === SEL); if (j) renderDetail(j); }
+  // Background refreshes leave the open job alone (no PDF reload, notes keep focus).
+  if (SEL && !keepDetail) { const j = JOBS.find(x => x.job_url === SEL); if (j) renderDetail(j); }
 }
 
 function renderChips() {
@@ -341,7 +355,8 @@ async function refresh() {
 (async () => {
   try { showTab(localStorage.getItem("ap-tab") || "status"); } catch (e) { showTab("status"); }
   await Promise.all([loadStatus(), loadJobs()]);
-  setInterval(() => getJSON("/api/refresh", {method: "POST", body: "{}"}).then(loadStatus).catch(() => {}), 120000);
+  setInterval(() => getJSON("/api/refresh", {method: "POST", body: "{}"})
+    .then(() => Promise.all([loadStatus(), loadJobs(true)])).catch(() => {}), 120000);
 })();
 </script>
 </body>
