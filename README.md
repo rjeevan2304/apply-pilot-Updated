@@ -171,7 +171,10 @@ Everything runs headless; no display or local machine needed.
    This installs dependencies and headless Chromium, creates `~/.applypilot/`, and enables a
    systemd timer that runs `applypilot cycle` every 6 hours (missed runs catch up after a reboot).
 3. Fill in `~/.applypilot/profile.json`, `resume.txt`, `searches.yaml` and `.env`
-   (`GEMINI_API_KEY=...`), then start a first run:
+   (`GEMINI_API_KEY=...`). Optionally do a quick test first: `bash deploy/gcp/test_run.sh`
+   (2 searches, 2 companies, up to 6 jobs scored and 2 resumes tailored, in a separate
+   `~/.applypilot-test` folder; add `gs://BUCKET/test-run` to test the upload too).
+   Then start a first run:
 
    ```bash
    sudo systemctl start applypilot-cycle.service
