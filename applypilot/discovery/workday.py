@@ -533,12 +533,22 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
     sig = hashlib.sha1(("|".join(queries) + "#" + "|".join(keys)).encode("utf-8")).hexdigest()[:12]
     state_file = config.APP_DIR / ".workday_progress"
     start_q = start_e = 0
+    finished_at = 0.0
     try:
         saved = state_file.read_text().split()
         if saved[2:3] == [sig]:
             start_q, start_e = int(saved[0]), int(saved[1])
+            finished_at = float(saved[3]) if len(saved) > 3 else 0.0
     except (OSError, ValueError, IndexError):
         pass
+
+    # After a completed full pass, wait before starting the next one (0 = always run).
+    recheck_h = float(search_cfg.get("workday_recheck_hours", 24))
+    if finished_at and start_q == 0 and start_e == 0 and recheck_h \
+            and time.time() - finished_at < recheck_h * 3600:
+        log.info("Workday: full pass finished %.1f h ago; next pass after %g h. Skipping.",
+                 (time.time() - finished_at) / 3600, recheck_h)
+        return {"found": 0, "new": 0, "existing": 0, "queries": 0, "skipped": True}
     if start_q >= len(queries):
         start_q = start_e = 0
     if start_q or start_e:
@@ -570,7 +580,11 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
         grand_existing += result["existing"]
         grand_found += result["found"]
 
-    save(0, 0)  # full pass done: next run starts from the top
+    # Full pass done: next pass starts from the top (after workday_recheck_hours).
+    try:
+        state_file.write_text(f"0 0 {sig} {time.time()}")
+    except OSError:
+        log.debug("Could not save Workday progress", exc_info=True)
 
     log.info("Workday crawl done: %d found, %d new, %d existing across %d queries x %d employers",
              grand_found, grand_new, grand_existing, len(queries), len(employers))

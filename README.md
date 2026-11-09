@@ -63,6 +63,19 @@ Everything is saved as it happens (each search, each job's details, each score, 
 resume), so stopping a run never loses finished work. A new scheduled run never starts while
 one is still going.
 
+Searches already done recently aren't repeated: a job-board search (title + city) waits 12 hours
+(`recheck_after_hours`) and a completed Workday pass waits 24 hours (`workday_recheck_hours`).
+Jobs already found are never scored or tailored twice.
+
+**Skip searching for one run** (process the jobs already found first):
+
+```bash
+touch ~/.applypilot/skip-search-once && sudo systemctl start --no-block applypilot-cycle.service
+```
+
+The run deletes that file when it starts, so later runs search normally. From the command line,
+`applypilot cycle --skip-search` does the same.
+
 Output (updated in place on every run):
 
 ```

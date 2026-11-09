@@ -638,7 +638,8 @@ def _process(min_score: int, validation_mode: str, cover: bool, score_batch: int
 
 
 def run_cycle(min_score: int = 7, workers: int = 1, validation_mode: str = "normal",
-              cover: bool = False, score_batch: int = 50, publish=None) -> dict:
+              cover: bool = False, score_batch: int = 50, publish=None,
+              skip_search: bool = False) -> dict:
     """One scheduled run, ordered so results appear early and nothing is lost.
 
     1. Fast searches: India job boards -> UAE job boards -> target companies.
@@ -646,6 +647,9 @@ def run_cycle(min_score: int = 7, workers: int = 1, validation_mode: str = "norm
     3. Slow searches: other job sites, then Workday last (no time limit; resumes
        where it stopped if interrupted).
     4. Process the new jobs the same way.
+
+    skip_search=True skips steps 1 and 3: only the backlog already in the
+    database is processed (details, scoring, tailoring, publishing).
     """
     load_env()
     ensure_dirs()
@@ -655,13 +659,19 @@ def run_cycle(min_score: int = 7, workers: int = 1, validation_mode: str = "norm
     console.print(Panel.fit("[bold]ApplyPilot cycle[/bold]  fast searches -> results -> Workday last",
                             border_style="cyan"))
 
-    _set_progress(stage="discover", detail="starting")
-    fast = _discover_fast(workers)
-    first = _process(min_score, validation_mode, cover, score_batch, publish, "India/UAE/companies")
+    if skip_search:
+        log.info("Skipping all searches this run: processing the existing backlog only")
+        fast, slow = {}, {}
+        first = _process(min_score, validation_mode, cover, score_batch, publish, "existing backlog")
+        second = {}
+    else:
+        _set_progress(stage="discover", detail="starting")
+        fast = _discover_fast(workers)
+        first = _process(min_score, validation_mode, cover, score_batch, publish, "India/UAE/companies")
 
-    _set_progress(stage="discover", detail="slow sources")
-    slow = _discover_slow(workers)
-    second = _process(min_score, validation_mode, cover, score_batch, publish, "other sites + Workday")
+        _set_progress(stage="discover", detail="slow sources")
+        slow = _discover_slow(workers)
+        second = _process(min_score, validation_mode, cover, score_batch, publish, "other sites + Workday")
 
     elapsed = time.time() - t0
     log.info("Cycle finished in %.1f h", elapsed / 3600)

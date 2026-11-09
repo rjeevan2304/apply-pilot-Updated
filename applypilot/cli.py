@@ -478,6 +478,11 @@ def cycle(
         0, "--loop-hours",
         help="Repeat forever every N hours (0 = run once; use with systemd/cron instead if possible).",
     ),
+    skip_search: bool = typer.Option(
+        False, "--skip-search",
+        help="Don't search this run; just process jobs already found. (Or create "
+             "~/.applypilot/skip-search-once to do this for the next scheduled run only.)",
+    ),
 ) -> None:
     """Headless run for servers. Never applies to anything.
 
@@ -525,10 +530,17 @@ def cycle(
 
         heartbeat.publish = publish
 
+        once_file = APP_DIR / "skip-search-once"
+        skip_now = skip_search
+        if once_file.exists():
+            skip_now = True
+            once_file.unlink(missing_ok=True)   # one run only
+            log.info("Found %s: skipping searches for this run only", once_file)
+
         try:
             result = run_cycle(
                 min_score=min_score, workers=workers, validation_mode=validation,
-                cover=cover, publish=publish,
+                cover=cover, publish=publish, skip_search=skip_now,
             )
             if result.get("errors"):
                 log.warning("Some stages reported errors: %s", result.get("errors"))

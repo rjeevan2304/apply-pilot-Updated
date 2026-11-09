@@ -32,6 +32,7 @@ def run(monkeypatch, tmp_path, cfg, stop_after):
             return R()
 
     monkeypatch.setattr(js, "get_connection", lambda: C())
+    cfg = {"recheck_after_hours": 0, **cfg}    # rotation tests: recency rule off unless set
     js._full_crawl(search_cfg=dict(cfg, deadline_epoch=5000), sites=["indeed"])
     return seen
 
@@ -58,3 +59,17 @@ def test_company_boards_allow_program_and_project_managers():
     assert title_matches("Technical Program Manager", kw)
     assert title_matches("Associate Project Manager", ["project"])
     assert not title_matches("Engineering Manager", kw)
+
+
+
+def test_recent_searches_are_not_repeated(monkeypatch, tmp_path):
+    cfg = {"queries": [{"query": q, "tier": 1} for q in "ABC"], "locations": [{"location": "X"}],
+           "recheck_after_hours": 12}
+    assert run(monkeypatch, tmp_path, cfg, 2) == ["A", "B"]      # stopped after B
+    assert run(monkeypatch, tmp_path, cfg, 9) == ["C"]           # A, B done minutes ago: skipped
+
+    import json
+    log = tmp_path / ".search_log_india.json"
+    data = json.loads(log.read_text())
+    log.write_text(json.dumps({k: v - 24 * 3600 for k, v in data.items()}))  # a day later
+    assert run(monkeypatch, tmp_path, cfg, 9) == ["A", "B", "C"]

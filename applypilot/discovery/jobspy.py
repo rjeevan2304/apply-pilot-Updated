@@ -493,11 +493,39 @@ def _full_crawl(
     jobspy_log = logging.getLogger("jobspy")
     jobspy_log.addHandler(watch)
 
+    # Don't repeat a search (title + location) that already ran recently, e.g. when
+    # a run is restarted. 0 disables. Per region, kept in ~/.applypilot.
+    import json as _json
+    recheck_h = float(search_cfg.get("recheck_after_hours", 12))
+    log_file = config.APP_DIR / f".search_log_{(search_cfg.get('region') or 'india').lower()}.json"
     try:
-        for idx, s in enumerate(searches):
+        search_log = _json.loads(log_file.read_text())
+    except (OSError, ValueError):
+        search_log = {}
+
+    def _key(s):
+        return f"{s['query']}@{s['location']}"
+
+    now = time.time()
+    todo = [(pos, s) for pos, s in enumerate(searches)
+            if not recheck_h or _key(s) not in search_log
+            or now - float(search_log[_key(s)]) >= recheck_h * 3600]
+    if len(todo) < len(searches):
+        log.info("Skipping %d search(es) already done in the last %g h", len(searches) - len(todo), recheck_h)
+    next_pos = 0  # position (in the rotated list) to resume from next run
+
+    def _remember(s):
+        search_log[_key(s)] = time.time()
+        try:
+            log_file.write_text(_json.dumps(search_log))
+        except OSError:
+            log.debug("Could not save search log", exc_info=True)
+
+    try:
+        for idx, (pos, s) in enumerate(todo):
             if deadline and time.time() > float(deadline):
                 log.warning("Time budget used up: skipping the remaining %d searches "
-                            "(the next run picks them up)", len(searches) - idx)
+                            "(the next run picks them up)", len(todo) - idx)
                 break
             if idx and idx % batch_size == 0:
                 log.info("Batch %d/%d done. Resting %gs before next batch...",
@@ -525,6 +553,8 @@ def _full_crawl(
                 for k in ("new", "existing"):
                     result[k] = result.get(k, 0) + again.get(k, 0)
             completed += 1
+            next_pos = pos + 1
+            _remember(s)
             total_new += result["new"]
             total_existing += result["existing"]
             total_errors += result["errors"]
@@ -536,7 +566,7 @@ def _full_crawl(
         jobspy_log.removeHandler(watch)
         if searches and search_cfg.get("rotate", True):
             try:
-                offset_file.write_text(str((offset + completed) % len(searches)))
+                offset_file.write_text(str((offset + next_pos) % len(searches)))
             except OSError:
                 log.debug("Could not save search rotation offset", exc_info=True)
 

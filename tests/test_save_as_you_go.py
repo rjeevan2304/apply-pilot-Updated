@@ -103,7 +103,13 @@ def test_workday_resumes_where_it_stopped(tmp_path, monkeypatch):
 
     seen.clear()
     workday.run_workday_discovery()
-    assert seen[0] == ("q1", "A")                              # full pass done -> from the top
+    assert seen == []                                          # full pass done < 24 h ago: skipped
+
+    state = tmp_path / ".workday_progress"
+    q, e, sig, ts = state.read_text().split()
+    state.write_text(f"{q} {e} {sig} {float(ts) - 25 * 3600}")  # a day later
+    workday.run_workday_discovery()
+    assert seen[0] == ("q1", "A")                              # new pass from the top
 
 
 def test_cycle_publishes_before_workday(monkeypatch):
@@ -161,3 +167,17 @@ def test_heartbeat_republishes_when_new_resumes_appear(monkeypatch, tmp_path):
     time.sleep(0.5)
     hb.stop()
     assert 1 <= len(published) <= 2      # only when the count went up, not every tick
+
+
+def test_skip_search_processes_backlog_only(monkeypatch):
+    from applypilot import pipeline
+
+    order = []
+    monkeypatch.setattr(pipeline, "load_env", lambda: None)
+    monkeypatch.setattr(pipeline, "ensure_dirs", lambda: None)
+    monkeypatch.setattr(pipeline, "init_db", lambda: None)
+    monkeypatch.setattr(pipeline, "_discover_fast", lambda w: order.append("search") or {})
+    monkeypatch.setattr(pipeline, "_discover_slow", lambda w: order.append("search") or {})
+    monkeypatch.setattr(pipeline, "_process", lambda *a: order.append(a[-1]) or {})
+    pipeline.run_cycle(skip_search=True)
+    assert order == ["existing backlog"]

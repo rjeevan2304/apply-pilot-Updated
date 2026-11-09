@@ -98,3 +98,5 @@ max_total_cooldown_seconds: 3600
 # Stop searching after this many minutes so the run moves on to scoring and
 # tailoring; the next run continues with the searches that were skipped.
 time_budget_minutes: 60
+# Don't repeat a job-board search (title + city) that ran in the last N hours (0 = always).
+recheck_after_hours: 12
