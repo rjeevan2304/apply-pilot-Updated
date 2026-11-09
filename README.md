@@ -107,7 +107,8 @@ search_pause_seconds: 10          # pause between searches
 batch_pause_seconds: 120          # pause between batches
 rate_limit_cooldown_seconds: 300  # cool-off after a 429 / captcha
 max_total_cooldown_seconds: 3600  # cap on total cool-off per run
-time_budget_minutes: 240          # optional: stop searching after this long
+time_budget_minutes: 180          # stop searching after this long; the next run resumes
+                                  # with the skipped searches (per region)
 ```
 
 LinkedIn detail pages are fetched at most 15 per pass with random delays; the pass stops at the

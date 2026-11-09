@@ -15,6 +15,7 @@ Environment=COLUMNS=160
 # Optional overrides (bucket, schedule options...) live here; ~/.applypilot/.env is also read.
 EnvironmentFile=-/etc/default/applypilot
 ExecStart=__REPO__/.venv/bin/applypilot cycle $APPLYPILOT_CYCLE_ARGS
-# A full crawl + LLM scoring can take hours on the Gemini free tier.
-TimeoutStartSec=6h
+# A full crawl + LLM scoring can take hours on the Gemini free tier. Searching is
+# capped by time_budget_minutes; this is a safety net for the whole run.
+TimeoutStartSec=10h
 Nice=10

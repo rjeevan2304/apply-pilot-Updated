@@ -90,10 +90,22 @@ title_keywords:
   - ml
   - machine learning
   - architect
+  - solutions
+  - implementation
+  - deployed
+  - deployment
+  - program
+  - consultant
+  - advocate
+  - developer relations
+  - sdet
+  - qa
+  - test
+  - customer success
 
 # Drop titles containing any of these words (whole words, case-insensitive).
 # Senior titles (senior/staff/lead/principal/...) and "... Manager" (except
-# Product Manager) are dropped automatically.
+# Product / Program / Project Manager) are dropped automatically.
 exclude_title_words:
   - principle            # common misspelling of "principal"
   - sales
