@@ -122,3 +122,7 @@ exclude_titles:
 # Stop searching after this many minutes so the run moves on to scoring and
 # tailoring; the next run continues with the searches that were skipped.
 time_budget_minutes: 180
+# Don't repeat a job-board search (title + city) that ran in the last N hours (0 = always).
+recheck_after_hours: 12
+# After a complete Workday pass, wait this many hours before the next one (0 = every run).
+workday_recheck_hours: 24

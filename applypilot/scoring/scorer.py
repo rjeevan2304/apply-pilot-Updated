@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 
 from applypilot.config import RESUME_PATH, load_profile
-from applypilot.database import get_connection, get_jobs_by_stage, job_company
+from applypilot.database import SavingList, get_connection, get_jobs_by_stage, job_company
 from applypilot.llm import LLMQuotaExhausted, get_client_for
 
 log = logging.getLogger(__name__)
@@ -172,7 +172,15 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     completed = 0
     errors = 0
     quota_exhausted = False
-    results: list[dict] = []
+    def _save_score(r: dict) -> None:
+        conn.execute(
+            "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
+            (r["score"], f"{r['keywords']}\n{r['reasoning']}",
+             datetime.now(timezone.utc).isoformat(), r["url"]),
+        )
+        conn.commit()
+
+    results: list[dict] = SavingList(_save_score)  # each score is saved as soon as it's made
 
     for job in jobs:
         try:
@@ -208,14 +216,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
             completed, len(jobs), result["score"], job.get("title", "?")[:60],
         )
 
-    # Write scores to DB
-    now = datetime.now(timezone.utc).isoformat()
-    for r in results:
-        conn.execute(
-            "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
-            (r["score"], f"{r['keywords']}\n{r['reasoning']}", now, r["url"]),
-        )
-    conn.commit()
+    # (Scores were saved one by one as they were made.)
 
     elapsed = time.time() - t0
     log.info("Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0)

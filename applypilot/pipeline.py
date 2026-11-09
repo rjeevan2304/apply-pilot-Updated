@@ -69,73 +69,63 @@ _UPSTREAM: dict[str, str | None] = {
 # Individual stage runners
 # ---------------------------------------------------------------------------
 
-def _run_discover(workers: int = 1) -> dict:
-    """Stage: Job discovery — JobSpy, Workday, and smart-extract scrapers."""
-    stats: dict = {"jobspy": None, "workday": None, "companies": None, "smartextract": None}
-
-    # JobSpy
-    console.print("  [cyan]JobSpy full crawl...[/cyan]")
-    _set_progress(detail="Job boards (India)")
+def _source(stats: dict, key: str, label: str, detail: str, fn) -> None:
+    """Run one discovery source; an error in one source never stops the others."""
+    console.print(f"  [cyan]{label}...[/cyan]")
+    _set_progress(detail=detail)
     try:
-        from applypilot.discovery.jobspy import run_discovery
-        run_discovery()
-        stats["jobspy"] = "ok"
+        res = fn()
+        stats[key] = f"ok ({res['new']} new)" if isinstance(res, dict) and "new" in res else "ok"
     except Exception as e:
-        log.error("JobSpy crawl failed: %s", e)
-        console.print(f"  [red]JobSpy error:[/red] {e}")
-        stats["jobspy"] = f"error: {e}"
+        log.error("%s failed: %s", label, e)
+        console.print(f"  [red]{label} error:[/red] {e}")
+        stats[key] = f"error: {e}"
 
-    # JobSpy: optional second region (UAE) from searches_uae.yaml
+
+def _discover_fast(workers: int = 1) -> dict:
+    """India job boards, UAE job boards (if configured), then the target companies."""
+    stats: dict = {}
+
+    def india():
+        from applypilot.discovery.jobspy import run_discovery
+        return run_discovery()
+    _source(stats, "jobspy", "JobSpy full crawl", "Job boards (India)", india)
+
     from applypilot.config import load_uae_search_config
     uae_cfg = load_uae_search_config()
     if uae_cfg:
-        console.print("  [cyan]JobSpy UAE crawl...[/cyan]")
-        _set_progress(detail="Job boards (UAE)")
-        try:
+        def uae():
             from applypilot.discovery.jobspy import run_discovery
-            run_discovery(uae_cfg)
-            stats["jobspy_uae"] = "ok"
-        except Exception as e:
-            log.error("JobSpy UAE crawl failed: %s", e)
-            console.print(f"  [red]JobSpy UAE error:[/red] {e}")
-            stats["jobspy_uae"] = f"error: {e}"
+            return run_discovery(uae_cfg)
+        _source(stats, "jobspy_uae", "JobSpy UAE crawl", "Job boards (UAE)", uae)
 
-    # Workday corporate scraper
-    console.print("  [cyan]Workday corporate scraper...[/cyan]")
-    _set_progress(detail="Workday career sites")
-    try:
-        from applypilot.discovery.workday import run_workday_discovery
-        run_workday_discovery(workers=workers)
-        stats["workday"] = "ok"
-    except Exception as e:
-        log.error("Workday scraper failed: %s", e)
-        console.print(f"  [red]Workday error:[/red] {e}")
-        stats["workday"] = f"error: {e}"
-
-    # Target companies' own job boards (companies.yaml)
-    console.print("  [cyan]Target company job boards...[/cyan]")
-    _set_progress(detail="Target company job boards")
-    try:
+    def companies():
         from applypilot.discovery.companies import run_company_discovery
-        res = run_company_discovery()
-        stats["companies"] = f"ok ({res['new']} new)"
-    except Exception as e:
-        log.error("Company board discovery failed: %s", e)
-        console.print(f"  [red]Company boards error:[/red] {e}")
-        stats["companies"] = f"error: {e}"
+        return run_company_discovery()
+    _source(stats, "companies", "Target company job boards", "Target company job boards", companies)
+    return stats
 
-    # Smart extract
-    console.print("  [cyan]Smart extract (AI-powered scraping)...[/cyan]")
-    _set_progress(detail="Other job sites (smart extract)")
-    try:
+
+def _discover_slow(workers: int = 1) -> dict:
+    """Other job sites (smart extract), then Workday last. Neither has a time limit."""
+    stats: dict = {}
+
+    def smart():
         from applypilot.discovery.smartextract import run_smart_extract
-        run_smart_extract(workers=workers)
-        stats["smartextract"] = "ok"
-    except Exception as e:
-        log.error("Smart extract failed: %s", e)
-        console.print(f"  [red]Smart extract error:[/red] {e}")
-        stats["smartextract"] = f"error: {e}"
+        return run_smart_extract(workers=workers)
+    _source(stats, "smartextract", "Smart extract (AI-powered scraping)", "Other job sites (smart extract)", smart)
 
+    def workday():
+        from applypilot.discovery.workday import run_workday_discovery
+        return run_workday_discovery(workers=workers)
+    _source(stats, "workday", "Workday corporate scraper", "Workday career sites", workday)
+    return stats
+
+
+def _run_discover(workers: int = 1) -> dict:
+    """Stage: Job discovery. Order: India, UAE, target companies, other sites, Workday last."""
+    stats = _discover_fast(workers)
+    stats.update(_discover_slow(workers))
     return stats
 
 
@@ -579,3 +569,112 @@ def run_pipeline(
     console.print(f"{'=' * 70}\n")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Cycle used by `applypilot cycle` (the VM's scheduled runs)
+# ---------------------------------------------------------------------------
+
+def _process(min_score: int, validation_mode: str, cover: bool, score_batch: int,
+             publish, label: str) -> dict:
+    """Enrich, then score in batches; after each batch tailor/PDF/publish.
+
+    Everything is saved as it happens, and the shortlist is published after
+    every batch, so results show up on the dashboard while the run continues.
+    """
+    from applypilot.scoring.scorer import run_scoring
+    from applypilot.scoring.tailor import run_tailoring
+
+    totals = {"scored": 0, "tailored": 0, "batches": 0, "stopped_reason": ""}
+
+    _set_progress(stage="enrich", detail=label)
+    console.print(f"\n  [bold]Fetching job details ({label})[/bold]")
+    _run_enrich()
+
+    def tailor_and_publish() -> int:
+        made = 0
+        _set_progress(stage="tailor", detail=label)
+        r = run_tailoring(min_score=min_score, limit=score_batch, validation_mode=validation_mode)
+        made += r.get("approved", 0)
+        if cover:
+            _set_progress(stage="cover", detail=label)
+            _run_cover(min_score, validation_mode)
+        _set_progress(stage="pdf", detail=label)
+        _run_pdf()
+        _set_progress(stage="publish", detail=label)
+        try:
+            publish()
+        except Exception:
+            log.exception("Publishing the shortlist failed (will retry after the next batch)")
+        return made
+
+    while True:
+        totals["batches"] += 1
+        _set_progress(stage="score", detail=f"{label}, batch {totals['batches']}")
+        res = run_scoring(limit=score_batch)
+        totals["scored"] += res.get("scored", 0)
+        totals["tailored"] += tailor_and_publish()
+        if res.get("quota_exhausted"):
+            totals["stopped_reason"] = "LLM quota/credit used up"
+            break
+        if not res.get("scored"):
+            break  # nothing left to score (or every attempt failed)
+
+    # Tailor any 7+ jobs still waiting (e.g. from earlier runs), batch by batch.
+    for _ in range(50):
+        stats = get_stats()
+        if not stats.get("untailored_eligible"):
+            break
+        before = stats.get("tailored", 0)
+        tailor_and_publish()
+        if get_stats().get("tailored", 0) == before:
+            break  # no progress (LLM limits or repeated failures): try again next run
+        totals["tailored"] += get_stats().get("tailored", 0) - before
+
+    log.info("%s: scored %d, tailored %d in %d batch(es)%s", label, totals["scored"],
+             totals["tailored"], totals["batches"],
+             f" (stopped: {totals['stopped_reason']})" if totals["stopped_reason"] else "")
+    return totals
+
+
+def run_cycle(min_score: int = 7, workers: int = 1, validation_mode: str = "normal",
+              cover: bool = False, score_batch: int = 50, publish=None,
+              skip_search: bool = False) -> dict:
+    """One scheduled run, ordered so results appear early and nothing is lost.
+
+    1. Fast searches: India job boards -> UAE job boards -> target companies.
+    2. Process them: details -> score in batches -> tailor + PDF + publish after each batch.
+    3. Slow searches: other job sites, then Workday last (no time limit; resumes
+       where it stopped if interrupted).
+    4. Process the new jobs the same way.
+
+    skip_search=True skips steps 1 and 3: only the backlog already in the
+    database is processed (details, scoring, tailoring, publishing).
+    """
+    load_env()
+    ensure_dirs()
+    init_db()
+    publish = publish or (lambda: None)
+    t0 = time.time()
+    console.print(Panel.fit("[bold]ApplyPilot cycle[/bold]  fast searches -> results -> Workday last",
+                            border_style="cyan"))
+
+    if skip_search:
+        log.info("Skipping all searches this run: processing the existing backlog only")
+        fast, slow = {}, {}
+        first = _process(min_score, validation_mode, cover, score_batch, publish, "existing backlog")
+        second = {}
+    else:
+        _set_progress(stage="discover", detail="starting")
+        fast = _discover_fast(workers)
+        first = _process(min_score, validation_mode, cover, score_batch, publish, "India/UAE/companies")
+
+        _set_progress(stage="discover", detail="slow sources")
+        slow = _discover_slow(workers)
+        second = _process(min_score, validation_mode, cover, score_batch, publish, "other sites + Workday")
+
+    elapsed = time.time() - t0
+    log.info("Cycle finished in %.1f h", elapsed / 3600)
+    errors = {k: v for k, v in {**fast, **slow}.items() if isinstance(v, str) and v.startswith("error")}
+    return {"discovery": {**fast, **slow}, "first": first, "second": second,
+            "errors": errors, "elapsed": elapsed}

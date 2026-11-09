@@ -186,6 +186,22 @@ _ALL_COLUMNS: dict[str, str] = {
 }
 
 
+class SavingList(list):
+    """A list that saves each item the moment it's appended.
+
+    Used for per-job results (scores, tailored resumes, cover letters) so work
+    is in the database immediately, even if the run is stopped part-way.
+    """
+
+    def __init__(self, save) -> None:
+        super().__init__()
+        self._save = save
+
+    def append(self, item) -> None:  # type: ignore[override]
+        super().append(item)
+        self._save(item)
+
+
 def job_company(job: dict) -> str:
     """Return the employer name for a job.
 

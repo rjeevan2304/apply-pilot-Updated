@@ -45,10 +45,36 @@ Personal data (profile, resume, database, logs, tailored resumes) is never commi
 This fork is set up to **find jobs and tailor resumes only**; you apply yourself.
 
 ```bash
-applypilot cycle                 # discover -> enrich -> score -> tailor -> pdf -> export
+applypilot cycle                 # search, score, tailor, publish (see "How a run works")
 applypilot export                # just refresh the shortlist from what's already done
 applypilot export --min-score 6  # include weaker matches
 ```
+
+### How a run works
+
+1. **Fast searches:** India job boards → UAE job boards → your target companies.
+2. **Process them:** fetch details, then score in batches of 50; after every batch the 7+ jobs
+   get tailored resumes and PDFs, and the shortlist (CSV, resumes, bucket, dashboard) is updated.
+3. **Slow searches:** other job sites, then **Workday last** (no time limit). If a run is
+   interrupted, Workday continues from the employer where it stopped.
+4. **Process those** the same way.
+
+Everything is saved as it happens (each search, each job's details, each score, each tailored
+resume), so stopping a run never loses finished work. A new scheduled run never starts while
+one is still going.
+
+Searches already done recently aren't repeated: a job-board search (title + city) waits 12 hours
+(`recheck_after_hours`) and a completed Workday pass waits 24 hours (`workday_recheck_hours`).
+Jobs already found are never scored or tailored twice.
+
+**Skip searching for one run** (process the jobs already found first):
+
+```bash
+touch ~/.applypilot/skip-search-once && sudo systemctl start --no-block applypilot-cycle.service
+```
+
+The run deletes that file when it starts, so later runs search normally. From the command line,
+`applypilot cycle --skip-search` does the same.
 
 Output (updated in place on every run):
 

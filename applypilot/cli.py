@@ -334,7 +334,7 @@ def _gcs_uri(gcs: Optional[str]) -> str:
 
 
 def _do_export(min_score: int, output: Optional[str], no_copy: bool, gcs: Optional[str],
-               quiet: bool = False) -> int:
+               quiet: bool = False, write_status: bool = True) -> int:
     """Export the shortlist (and optionally sync to GCS). Returns job count."""
     from pathlib import Path
 
@@ -344,6 +344,7 @@ def _do_export(min_score: int, output: Optional[str], no_copy: bool, gcs: Option
         min_score=min_score,
         output_dir=Path(output).expanduser() if output else None,
         copy_files=not no_copy,
+        write_status=write_status,
     )
 
     if not quiet and result["records"]:
@@ -392,11 +393,14 @@ def export(
 class _StatusHeartbeat:
     """Refresh status.json (and its copy in the bucket) while a cycle runs.
 
-    Writes every 5 minutes, and within ~30 s of a stage change, so the local
-    dashboard can show what the run is doing. Never interrupts the run.
+    Writes every 2 minutes, and within ~30 s of a stage change, so the
+    dashboard can show what the run is doing. If a `publish` callback is set,
+    also republishes the shortlist every 10 minutes when new tailored resumes
+    exist (e.g. in the middle of a long tailoring batch). Never interrupts the run.
     """
 
-    def __init__(self, output: Optional[str], gcs: Optional[str], every: float = 300.0) -> None:
+    def __init__(self, output: Optional[str], gcs: Optional[str], every: float = 120.0,
+                 publish_every: float = 600.0) -> None:
         import threading
         from datetime import datetime
         from pathlib import Path
@@ -406,6 +410,9 @@ class _StatusHeartbeat:
         self.dir = Path(output).expanduser() if output else default_export_dir()
         self.gcs = _gcs_uri(gcs)
         self.every = every
+        self.publish_every = publish_every
+        self.publish = None          # set by `cycle`; called under self.publish_lock
+        self.publish_lock = threading.Lock()
         self.started_at = datetime.now().astimezone().isoformat(timespec="seconds")
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="status-heartbeat", daemon=True)
@@ -420,17 +427,35 @@ class _StatusHeartbeat:
         except Exception:
             log.debug("Status heartbeat failed", exc_info=True)
 
+    def _tailored_count(self) -> int:
+        try:
+            from applypilot.database import get_stats
+            return int(get_stats().get("tailored") or 0)
+        except Exception:
+            return -1
+
     def _loop(self) -> None:
+        import time as _t
         from applypilot.pipeline import PROGRESS
 
         last_key = None
         last_write = 0.0
+        last_publish = _t.time()
+        published_count = self._tailored_count()
         while not self._stop.is_set():
             key = (PROGRESS.get("stage"), PROGRESS.get("detail"))
-            import time as _t
             if key != last_key or _t.time() - last_write >= self.every:
                 self._write()
                 last_key, last_write = key, _t.time()
+            if self.publish and _t.time() - last_publish >= self.publish_every:
+                count = self._tailored_count()
+                if count > published_count:
+                    try:
+                        self.publish()
+                        published_count = count
+                    except Exception:
+                        log.debug("Periodic publish failed", exc_info=True)
+                last_publish = _t.time()
             self._stop.wait(30)
 
     def start(self) -> None:
@@ -453,11 +478,18 @@ def cycle(
         0, "--loop-hours",
         help="Repeat forever every N hours (0 = run once; use with systemd/cron instead if possible).",
     ),
+    skip_search: bool = typer.Option(
+        False, "--skip-search",
+        help="Don't search this run; just process jobs already found. (Or create "
+             "~/.applypilot/skip-search-once to do this for the next scheduled run only.)",
+    ),
 ) -> None:
-    """Headless run for servers: discover -> enrich -> score -> tailor -> pdf -> export.
+    """Headless run for servers. Never applies to anything.
 
-    Never applies to anything. Safe to run from cron/systemd; overlapping runs
-    are prevented with a lock file.
+    Order: India job boards -> UAE job boards -> target companies -> details ->
+    score in batches (tailor, PDF and publish the shortlist after each batch) ->
+    other job sites -> Workday (last, no time limit) -> process those the same way.
+    Everything is saved as it happens. Overlapping runs are prevented with a lock file.
     """
     import fcntl
     import time as _time
@@ -465,7 +497,7 @@ def cycle(
     _bootstrap()
 
     from applypilot.config import APP_DIR, check_tier
-    from applypilot.pipeline import run_pipeline
+    from applypilot.pipeline import run_cycle
 
     check_tier(2, "AI scoring/tailoring")
     _gcs_uri(gcs)  # fail fast on a bad bucket address before hours of work
@@ -476,7 +508,6 @@ def cycle(
         console.print("[red]Missing required file(s):[/red] " + ", ".join(missing))
         console.print("Copy config/profile.example.json and your resume.txt there first (see README).")
         raise typer.Exit(code=1)
-    stages = ["discover", "enrich", "score", "tailor"] + (["cover"] if cover else []) + ["pdf"]
 
     lock_file = open(APP_DIR / ".cycle.lock", "w")
     try:
@@ -487,13 +518,29 @@ def cycle(
 
     while True:
         started = _time.time()
-        log.info("Cycle start: stages=%s", ",".join(stages))
+        log.info("Cycle start")
         heartbeat = _StatusHeartbeat(output, gcs)
         heartbeat.start()
+
+        def publish(hb=heartbeat) -> None:
+            """Mid-run: update shortlist.csv, resumes and the bucket; keep status 'running'."""
+            with hb.publish_lock:
+                _do_export(min_score, output, no_copy=False, gcs=gcs, quiet=True, write_status=False)
+                hb._write()
+
+        heartbeat.publish = publish
+
+        once_file = APP_DIR / "skip-search-once"
+        skip_now = skip_search
+        if once_file.exists():
+            skip_now = True
+            once_file.unlink(missing_ok=True)   # one run only
+            log.info("Found %s: skipping searches for this run only", once_file)
+
         try:
-            result = run_pipeline(
-                stages=stages, min_score=min_score, workers=workers,
-                validation_mode=validation,
+            result = run_cycle(
+                min_score=min_score, workers=workers, validation_mode=validation,
+                cover=cover, publish=publish, skip_search=skip_now,
             )
             if result.get("errors"):
                 log.warning("Some stages reported errors: %s", result.get("errors"))

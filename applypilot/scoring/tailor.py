@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from applypilot.config import RESUME_PATH, TAILORED_DIR, load_profile
-from applypilot.database import job_company, job_file_prefix, get_connection, get_jobs_by_stage
+from applypilot.database import SavingList, job_company, job_file_prefix, get_connection, get_jobs_by_stage
 from applypilot.llm import ClaudeCLIError, get_client
 from applypilot.scoring.validator import (
     BANNED_WORDS,
@@ -494,7 +494,24 @@ def run_tailoring(min_score: int = 7, limit: int = 20,
     log.info("Tailoring resumes for %d jobs (score >= %d)...", len(jobs), min_score)
     t0 = time.time()
     completed = 0
-    results: list[dict] = []
+    _success_statuses = {"approved", "approved_with_judge_warning"}
+
+    def _save_result(r: dict) -> None:
+        """Save one job's tailoring outcome right away (survives interruptions)."""
+        if r["status"] in _success_statuses:
+            conn.execute(
+                "UPDATE jobs SET tailored_resume_path=?, tailored_at=?, "
+                "tailor_attempts=COALESCE(tailor_attempts,0)+1 WHERE url=?",
+                (r["path"], datetime.now(timezone.utc).isoformat(), r["url"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs SET tailor_attempts=COALESCE(tailor_attempts,0)+1 WHERE url=?",
+                (r["url"],),
+            )
+        conn.commit()
+
+    results: list[dict] = SavingList(_save_result)
     stats: dict[str, int] = {"approved": 0, "failed_validation": 0, "failed_judge": 0, "error": 0}
 
     for job in jobs:
@@ -606,22 +623,7 @@ def run_tailoring(min_score: int = 7, limit: int = 20,
             result["title"][:40],
         )
 
-    # Persist to DB: increment attempt counter for ALL, save path only for approved
-    now = datetime.now(timezone.utc).isoformat()
-    _success_statuses = {"approved", "approved_with_judge_warning"}
-    for r in results:
-        if r["status"] in _success_statuses:
-            conn.execute(
-                "UPDATE jobs SET tailored_resume_path=?, tailored_at=?, "
-                "tailor_attempts=COALESCE(tailor_attempts,0)+1 WHERE url=?",
-                (r["path"], now, r["url"]),
-            )
-        else:
-            conn.execute(
-                "UPDATE jobs SET tailor_attempts=COALESCE(tailor_attempts,0)+1 WHERE url=?",
-                (r["url"],),
-            )
-    conn.commit()
+    # (Each job's outcome was saved as soon as it finished.)
 
     elapsed = time.time() - t0
     log.info(
