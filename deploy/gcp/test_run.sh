@@ -32,7 +32,8 @@ done
 
 export APPLYPILOT_DIR="$TEST"
 cd "$REPO"
-exec "$REPO/.venv/bin/python" - "$GCS_URI" "$REAL/searches.yaml" <<'PY'
+# Not `exec`: keep this bash process (named test_run.sh) alive so `pgrep -af test_run` finds the test.
+"$REPO/.venv/bin/python" - "$GCS_URI" "$REAL/searches.yaml" <<'PY'
 import logging, os, sys, time
 from pathlib import Path
 
