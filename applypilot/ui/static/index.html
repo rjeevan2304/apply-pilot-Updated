@@ -106,6 +106,7 @@
   <span class="spacer"></span>
   <span class="src" id="src"></span>
   <button class="btn" onclick="refresh()" id="refreshBtn">↻ Refresh</button>
+  <a class="btn" href="/logout" id="logout" hidden>Log out</a>
 </header>
 
 <main>
@@ -164,11 +165,17 @@ function showTab(t) {
   try { localStorage.setItem("ap-tab", t); } catch (e) {}
 }
 
-async function getJSON(u, opts) { const r = await fetch(u, opts); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+async function getJSON(u, opts) {
+  const r = await fetch(u, opts);
+  if (r.status === 401) { location.href = "/login"; throw new Error("login required"); }
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
 
 async function loadStatus() {
   const d = await getJSON("/api/status");
   document.getElementById("src").textContent = "Data: " + d.source + " · loaded " + fmt(d.loaded_at);
+  document.getElementById("logout").hidden = !d.protected;
   const s = d.status || {}, st = s.stats || {};
   const run = document.getElementById("run"), warn = document.getElementById("runwarn");
   warn.innerHTML = "";

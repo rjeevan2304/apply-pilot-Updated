@@ -182,6 +182,22 @@ It opens http://127.0.0.1:8765 (only reachable from your own computer). Without 
 CLI, download the bucket's `applypilot/` folder and use `--dir path/to/applypilot` instead.
 If ApplyPilot is fully installed, `applypilot ui --gcs gs://...` does the same.
 
+### Hosting the dashboard (Cloud Run, password protected)
+
+To open the dashboard from any browser or your phone without running anything locally, deploy it
+to Cloud Run in your own Google Cloud project. Only `applypilot/ui` is uploaded, not the rest of
+the repository. In **Cloud Shell** (the `>_` button at the top of the Cloud Console):
+
+```bash
+git clone https://github.com/rjeevan2304/apply-pilot-Updated.git && cd apply-pilot-Updated
+bash deploy/cloudrun/deploy.sh gs://YOUR_BUCKET/applypilot
+```
+
+The script asks for a password, enables Cloud Run / Cloud Build / Artifact Registry, creates a
+service account that can only use your bucket, builds and deploys, then prints the URL. Log in
+once per device (30-day cookie). To update: `git pull`, then run the same command (press Enter
+to keep the password). It scales to zero when idle, so normally stays in the free tier.
+
 ## Running on a Google Cloud VM
 
 Everything runs headless; no display or local machine needed.
