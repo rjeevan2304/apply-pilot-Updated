@@ -1,0 +1,114 @@
+# Target companies for direct discovery from their own job boards.
+# Copy to ~/.applypilot/companies.yaml to customise (that file wins if present).
+#
+# Each company's openings are fetched from its public applicant-tracking API
+# (no scraping, no login). Supported `ats` values:
+#   greenhouse  -> boards-api.greenhouse.io/v1/boards/<slug>/jobs
+#   lever       -> api.lever.co/v0/postings/<slug>
+#   ashby       -> api.ashbyhq.com/posting-api/job-board/<slug>
+#   workable    -> apply.workable.com/api/v1/widget/accounts/<slug>
+#   atlassian   -> www.atlassian.com/endpoint/careers/listings (no slug)
+# If you don't know the ATS, omit `ats` and list guesses under `slugs`;
+# every supported ATS is tried and the first board that exists is used.
+#
+# Only roles that are open to someone in India are kept: India locations,
+# UAE locations (second target region), or remote roles marked worldwide /
+# global / anywhere / APAC / Asia, or plain "Remote" with no region. Remote roles limited to other regions
+# (US, EMEA, UK, ...) are dropped.
+
+companies:
+  - name: Canonical
+    ats: greenhouse
+    slug: canonical            # verified 2026-11 (~316 openings; "Home based - Worldwide" etc.)
+  - name: GitLab
+    ats: greenhouse
+    slug: gitlab               # verified 2026-11
+  - name: Automattic
+    ats: greenhouse
+    slug: automatticcareers    # verified 2026-11
+  - name: Zapier
+    ats: ashby
+    slug: zapier               # verified 2026-11
+  - name: Deel
+    ats: ashby
+    slug: deel                 # board exists but was empty when checked (2026-11)
+  - name: Doist
+    slugs: [doist]             # not on Greenhouse/Lever/Ashby; likely Workable (unverified)
+  - name: Toggl
+    slugs: [toggl, toggl-track]  # likely Workable (unverified)
+  - name: PostHog
+    ats: ashby
+    slug: posthog              # verified 2026-11
+  - name: Supabase
+    ats: ashby
+    slug: supabase             # verified 2026-11
+  - name: Grafana Labs
+    ats: greenhouse
+    slug: grafanalabs          # verified 2026-11
+  - name: Elastic
+    ats: greenhouse
+    slug: elastic              # verified 2026-11 (locations are countries; remote-first)
+  - name: Remote.com
+    aliases: [Remote]
+    ats: greenhouse
+    slug: remotecom            # board exists but was empty when checked (2026-11)
+  - name: Hotjar (Contentsquare)
+    aliases: [Hotjar, Contentsquare]
+    ats: lever
+    slug: contentsquare        # verified 2026-11
+  - name: Atlassian
+    ats: atlassian             # verified 2026-11 (~351 openings incl. "Remote - India")
+  - name: Human Archive
+    ats: ashby
+    slug: humanarchive         # verified 2026-11
+  - name: SigNoz
+    ats: ashby
+    slug: signoz               # verified 2026-11
+
+# Keep only titles containing one of these words (case-insensitive, whole words).
+# Leave empty to keep every title (the LLM scorer still filters by fit).
+title_keywords:
+  - engineer
+  - engineering
+  - developer
+  - software
+  - product
+  - analyst
+  - data
+  - cloud
+  - devops
+  - reliability
+  - sre
+  - platform
+  - backend
+  - frontend
+  - full stack
+  - fullstack
+  - python
+  - golang
+  - ai
+  - ml
+  - machine learning
+  - architect
+
+# Drop titles containing any of these words (whole words, case-insensitive).
+# Senior titles (senior/staff/lead/principal/...) and "... Manager" (except
+# Product Manager) are dropped automatically.
+exclude_title_words:
+  - principle            # common misspelling of "principal"
+  - sales
+  - account
+  - marketer
+  - marketing
+  - hr
+  - generalist
+  - communications
+  - recruiter
+  - recruiting
+  - benefits
+  - accounting
+  - billing
+  - legal
+  - grc
+  - phd
+  - experienced

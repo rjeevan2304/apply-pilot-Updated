@@ -113,6 +113,23 @@ def load_search_config() -> dict:
     return yaml.safe_load(SEARCH_CONFIG_PATH.read_text(encoding="utf-8"))
 
 
+UAE_SEARCH_CONFIG_PATH = APP_DIR / "searches_uae.yaml"
+
+
+def load_uae_search_config() -> dict | None:
+    """Load the optional UAE search config (~/.applypilot/searches_uae.yaml).
+
+    Returns None when the file doesn't exist (UAE searching is then off).
+    Jobs it finds are tagged region="UAE".
+    """
+    import yaml
+    if not UAE_SEARCH_CONFIG_PATH.exists():
+        return None
+    cfg = yaml.safe_load(UAE_SEARCH_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    cfg.setdefault("region", "UAE")
+    return cfg
+
+
 def load_sites_config() -> dict:
     """Load sites.yaml configuration (sites list, manual_ats, blocked, etc.)."""
     import yaml
@@ -197,6 +214,16 @@ TIER_COMMANDS: dict[int, list[str]] = {
 }
 
 
+def _has_llm_configured() -> bool:
+    """True if any LLM backend is configured (API key, local URL, or Claude CLI)."""
+    if any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "KIE_API_KEY")):
+        return True
+    return (
+        os.environ.get("LLM_PROVIDER", "").strip().lower() == "claude_cli"
+        and shutil.which("claude") is not None
+    )
+
+
 def get_tier() -> int:
     """Detect the current tier based on available dependencies.
 
@@ -206,7 +233,7 @@ def get_tier() -> int:
     """
     load_env()
 
-    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL"))
+    has_llm = _has_llm_configured()
     if not has_llm:
         return 1
 
@@ -238,7 +265,7 @@ def check_tier(required: int, feature: str) -> None:
     _console = Console(stderr=True)
 
     missing: list[str] = []
-    if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")):
+    if required >= 2 and not _has_llm_configured():
         missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
         if not shutil.which("claude"):

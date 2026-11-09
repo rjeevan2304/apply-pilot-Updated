@@ -1,4 +1,4 @@
-"""JobSpy-based job discovery: searches Indeed, LinkedIn, Glassdoor, ZipRecruiter.
+"""JobSpy-based job discovery: searches Indeed, LinkedIn, Naukri (and optionally Glassdoor).
 
 Uses python-jobspy to scrape multiple job boards, deduplicates results,
 parses salary ranges, and stores everything in the ApplyPilot database.
@@ -8,7 +8,6 @@ search configuration YAML (searches.yaml) rather than being hardcoded.
 """
 
 import logging
-import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -17,6 +16,7 @@ from jobspy import scrape_jobs
 
 from applypilot import config
 from applypilot.database import get_connection, init_db, store_jobs
+from applypilot.discovery.filters import title_ok as _title_ok
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +55,24 @@ def parse_proxy(proxy_str: str) -> dict:
             f"Proxy format not recognized: {proxy_str}. "
             f"Expected: host:port:user:pass or host:port"
         )
+
+
+# -- Rate-limit watcher ------------------------------------------------------
+
+class _RateWatch(logging.Handler):
+    """Counts 429 / captcha messages that jobspy logs instead of raising."""
+    def __init__(self):
+        super().__init__(level=logging.ERROR)
+        self.hits = 0
+
+    def emit(self, record):
+        m = record.getMessage().lower()
+        if "429" in m or "recaptcha" in m or "rate limit" in m:
+            self.hits += 1
+
+
+# Region tag stored with each job: set from the search config ("UAE"); None means India.
+_REGION: str | None = None
 
 
 # -- Retry wrapper -----------------------------------------------------------
@@ -119,14 +137,6 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 # -- DB storage (JobSpy DataFrame -> SQLite) ---------------------------------
 
 
-def _title_ok(title: str | None) -> bool:
-    """Exclude unrelated functions and senior roles; preserve Product Analyst."""
-    if title is None or str(title).strip().lower() in {'', 'nan', 'none'}: return False
-    value = re.sub(r'\s+', ' ', str(title)).strip().lower()
-    excluded = ('business analyst','strategy analyst','strategy consultant','management consultant','business operations analyst','business operations','program analyst','program manager','project manager','operations analyst','financial analyst','management analyst','account executive','recruiter','human resources','marketing ')
-    if any(term in value for term in excluded): return False
-    senior = (r'\b(senior|sr\.?|staff|lead|principal|director|head|vp|vice president|chief)\b' r'|\b(level|l)\s*(ii|iii|iv|2|3|4)\b' r'|\b(manager|engineer|analyst)\s+(ii|iii|iv)\b')
-    return re.search(senior, value) is None
 
 def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tuple[int, int]:
     """Store JobSpy DataFrame results into the DB. Returns (new, existing)."""
@@ -157,7 +167,7 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
             if interval:
                 salary += f"/{interval}"
 
-        description = str(row.get("description", "")) if str(row.get("description", "")) != "nan" else None
+        description = str(row.get("description", "")) if str(row.get("description", "")) not in ("nan", "None", "") else None
         site_name = str(row.get("site", source_label))
         is_remote = row.get("is_remote", False)
 
@@ -175,19 +185,25 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
             detail_scraped_at = now
 
         # Extract apply URL if JobSpy provided it
-        apply_url = str(row.get("job_url_direct", "")) if str(row.get("job_url_direct", "")) != "nan" else None
+        apply_url = str(row.get("job_url_direct", "")) if str(row.get("job_url_direct", "")) not in ("nan", "None", "") else None
 
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at, "
-                "full_description, application_url, detail_scraped_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, title, salary, description, location_str, site_label, strategy, now,
-                 full_description, apply_url, detail_scraped_at),
+                "INSERT INTO jobs (url, title, salary, description, location, site, company, strategy, "
+                "discovered_at, full_description, application_url, detail_scraped_at, region) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (url, title, salary, description, location_str, site_label, company, strategy, now,
+                 full_description, apply_url, detail_scraped_at, _REGION),
             )
             new += 1
         except sqlite3.IntegrityError:
             existing += 1
+            # Backfill employer name for rows discovered before it was stored.
+            if company:
+                conn.execute(
+                    "UPDATE jobs SET company = ? WHERE url = ? AND company IS NULL",
+                    (company, url),
+                )
 
     conn.commit()
     return new, existing
@@ -216,7 +232,8 @@ def _run_one_search(
     # Split sites: Glassdoor needs simplified location, others use original
     gd_location = glassdoor_map.get(s["location"], s["location"].split(",")[0])
     has_glassdoor = "glassdoor" in sites
-    other_sites = [si for si in sites if si != "glassdoor"]
+    has_naukri = "naukri" in sites
+    other_sites = [si for si in sites if si not in ("glassdoor", "naukri")]
 
     all_dfs = []
 
@@ -237,12 +254,36 @@ def _run_one_search(
         if proxy_config:
             kwargs["proxies"] = [proxy_config["jobspy"]]
         if "linkedin" in other_sites:
-            kwargs["linkedin_fetch_description"] = True
+            kwargs["fetch_description"] = True
         try:
             df = _scrape_with_retry(kwargs, max_retries=max_retries)
             all_dfs.append(df)
         except Exception as e:
             log.error("[%s] (non-gd): %s", label, e)
+
+    # Run Naukri separately: it wants a bare city ("Hyderabad"), and remote
+    # searches use its work-from-home filter instead of a location.
+    if has_naukri:
+        nk_kwargs = {
+            "site_name": ["naukri"],
+            "search_term": s["query"],
+            "results_wanted": results_per_site,
+            "hours_old": hours_old,
+            "description_format": "markdown",
+            "fetch_description": True,  # search results have no description
+            "verbose": 0,
+        }
+        if s.get("remote"):
+            nk_kwargs["is_remote"] = True
+        else:
+            nk_kwargs["location"] = s["location"].split(",")[0].strip()
+        if proxy_config:
+            nk_kwargs["proxies"] = [proxy_config["jobspy"]]
+        try:
+            df = _scrape_with_retry(nk_kwargs, max_retries=max_retries)
+            all_dfs.append(df)
+        except Exception as e:
+            log.error("[%s] (naukri): %s", label, e)
 
     # Run Glassdoor separately with simplified location
     if has_glassdoor:
@@ -318,7 +359,7 @@ def search_jobs(
 ) -> dict:
     """Run a single job search via JobSpy and store results in DB."""
     if sites is None:
-        sites = ["indeed", "linkedin", "zip_recruiter"]
+        sites = ["indeed", "linkedin", "naukri"]
 
     proxy_config = parse_proxy(proxy) if proxy else None
 
@@ -341,8 +382,8 @@ def search_jobs(
     if proxy_config:
         kwargs["proxies"] = [proxy_config["jobspy"]]
 
-    if "linkedin" in sites:
-        kwargs["linkedin_fetch_description"] = True
+    if "linkedin" in sites or "naukri" in sites:
+        kwargs["fetch_description"] = True
 
     try:
         df = scrape_jobs(**kwargs)
@@ -386,7 +427,7 @@ def _full_crawl(
 ) -> dict:
     """Run all search queries from search config across all locations."""
     if sites is None:
-        sites = ["indeed", "linkedin", "zip_recruiter"]
+        sites = ["indeed", "linkedin", "naukri"]
 
     # Build search combinations from config
     queries = search_cfg.get("queries", [])
@@ -424,20 +465,62 @@ def _full_crawl(
     total_errors = 0
     completed = 0
 
-    for s in searches:
-        result = _run_one_search(
-            s, sites, results_per_site, hours_old,
-            proxy_config, defaults, max_retries,
-            accept_locs, reject_locs, glassdoor_map,
-        )
-        completed += 1
-        total_new += result["new"]
-        total_existing += result["existing"]
-        total_errors += result["errors"]
+    batch_size = max(1, int(search_cfg.get("batch_size", 5)))
+    search_pause = float(search_cfg.get("search_pause_seconds", 10))
+    batch_pause = float(search_cfg.get("batch_pause_seconds", 120))
+    log.info("Batching: %d searches per batch, %gs between searches, %gs between batches",
+             batch_size, search_pause, batch_pause)
 
-        if completed % 5 == 0 or completed == len(searches):
-            log.info("Progress: %d/%d queries done (%d new, %d dupes, %d errors)",
-                     completed, len(searches), total_new, total_existing, total_errors)
+    cooldown = float(search_cfg.get("rate_limit_cooldown_seconds", 300))
+    cooldown_budget = float(search_cfg.get("max_total_cooldown_seconds", 3600))
+    deadline = search_cfg.get("deadline_epoch")
+    if not deadline and search_cfg.get("time_budget_minutes"):
+        deadline = time.time() + float(search_cfg["time_budget_minutes"]) * 60
+    watch = _RateWatch()
+    jobspy_log = logging.getLogger("jobspy")
+    jobspy_log.addHandler(watch)
+
+    try:
+        for idx, s in enumerate(searches):
+            if deadline and time.time() > float(deadline):
+                log.warning("Time budget used up: skipping the remaining %d searches "
+                            "(the next run picks them up)", len(searches) - idx)
+                break
+            if idx and idx % batch_size == 0:
+                log.info("Batch %d/%d done. Resting %gs before next batch...",
+                         idx // batch_size, -(-len(searches) // batch_size), batch_pause)
+                time.sleep(batch_pause)
+            elif idx:
+                time.sleep(search_pause)
+            watch.hits = 0
+            result = _run_one_search(
+                s, sites, results_per_site, hours_old,
+                proxy_config, defaults, max_retries,
+                accept_locs, reject_locs, glassdoor_map,
+            )
+            if watch.hits and cooldown_budget >= cooldown:
+                log.warning("Rate limited (%d hits). Cooling off %gs, then retrying this search once.",
+                            watch.hits, cooldown)
+                cooldown_budget -= cooldown
+                time.sleep(cooldown)
+                watch.hits = 0
+                again = _run_one_search(
+                    s, sites, results_per_site, hours_old,
+                    proxy_config, defaults, max_retries,
+                    accept_locs, reject_locs, glassdoor_map,
+                )
+                for k in ("new", "existing"):
+                    result[k] = result.get(k, 0) + again.get(k, 0)
+            completed += 1
+            total_new += result["new"]
+            total_existing += result["existing"]
+            total_errors += result["errors"]
+
+            if completed % 5 == 0 or completed == len(searches):
+                log.info("Progress: %d/%d queries done (%d new, %d dupes, %d errors)",
+                         completed, len(searches), total_new, total_existing, total_errors)
+    finally:
+        jobspy_log.removeHandler(watch)
 
     # Final stats
     conn = get_connection()
@@ -477,6 +560,8 @@ def run_discovery(cfg: dict | None = None) -> dict:
         log.warning("No search configuration found. Run `applypilot init` to create one.")
         return {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
 
+    global _REGION
+    _REGION = cfg.get("region")
     proxy = cfg.get("proxy")
     sites = cfg.get("sites")
     results_per_site = cfg.get("defaults", {}).get("results_per_site", 100)

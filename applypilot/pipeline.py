@@ -35,7 +35,7 @@ console = Console()
 STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf")
 
 STAGE_META: dict[str, dict] = {
-    "discover": {"desc": "Job discovery (JobSpy + Workday + smart extract)"},
+    "discover": {"desc": "Job discovery (JobSpy + Workday + company boards + smart extract)"},
     "enrich":   {"desc": "Detail enrichment (full descriptions + apply URLs)"},
     "score":    {"desc": "LLM scoring (fit 1-10)"},
     "tailor":   {"desc": "Resume tailoring (LLM + validation)"},
@@ -61,7 +61,7 @@ _UPSTREAM: dict[str, str | None] = {
 
 def _run_discover(workers: int = 1) -> dict:
     """Stage: Job discovery — JobSpy, Workday, and smart-extract scrapers."""
-    stats: dict = {"jobspy": None, "workday": None, "smartextract": None}
+    stats: dict = {"jobspy": None, "workday": None, "companies": None, "smartextract": None}
 
     # JobSpy
     console.print("  [cyan]JobSpy full crawl...[/cyan]")
@@ -74,6 +74,20 @@ def _run_discover(workers: int = 1) -> dict:
         console.print(f"  [red]JobSpy error:[/red] {e}")
         stats["jobspy"] = f"error: {e}"
 
+    # JobSpy: optional second region (UAE) from searches_uae.yaml
+    from applypilot.config import load_uae_search_config
+    uae_cfg = load_uae_search_config()
+    if uae_cfg:
+        console.print("  [cyan]JobSpy UAE crawl...[/cyan]")
+        try:
+            from applypilot.discovery.jobspy import run_discovery
+            run_discovery(uae_cfg)
+            stats["jobspy_uae"] = "ok"
+        except Exception as e:
+            log.error("JobSpy UAE crawl failed: %s", e)
+            console.print(f"  [red]JobSpy UAE error:[/red] {e}")
+            stats["jobspy_uae"] = f"error: {e}"
+
     # Workday corporate scraper
     console.print("  [cyan]Workday corporate scraper...[/cyan]")
     try:
@@ -84,6 +98,17 @@ def _run_discover(workers: int = 1) -> dict:
         log.error("Workday scraper failed: %s", e)
         console.print(f"  [red]Workday error:[/red] {e}")
         stats["workday"] = f"error: {e}"
+
+    # Target companies' own job boards (companies.yaml)
+    console.print("  [cyan]Target company job boards...[/cyan]")
+    try:
+        from applypilot.discovery.companies import run_company_discovery
+        res = run_company_discovery()
+        stats["companies"] = f"ok ({res['new']} new)"
+    except Exception as e:
+        log.error("Company board discovery failed: %s", e)
+        console.print(f"  [red]Company boards error:[/red] {e}")
+        stats["companies"] = f"error: {e}"
 
     # Smart extract
     console.print("  [cyan]Smart extract (AI-powered scraping)...[/cyan]")

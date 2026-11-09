@@ -30,6 +30,7 @@ def _build_profile_summary(profile: dict) -> str:
         if personal.get(key): lines.append(f"{label}: {personal[key]}")
     lines.append(f"Legally authorised to work in India: {auth.get('legally_authorized_to_work', 'Not specified')}")
     lines.append(f"Employer sponsorship required in India: {auth.get('require_sponsorship', 'Not specified')}")
+    lines.append("UAE: not authorised to work; employer visa sponsorship required (answer accordingly for Dubai/UAE roles)")
     if comp.get('salary_expectation'): lines.append(f"Expected salary: ₹{int(comp['salary_expectation']) / 100000:g} LPA per annum")
     if comp.get('salary_range_min') and comp.get('salary_range_max'):
         lines.append(f"Acceptable range: ₹{int(comp['salary_range_min']) / 100000:g}–₹{int(comp['salary_range_max']) / 100000:g} LPA")
@@ -50,12 +51,13 @@ def _build_location_check(profile: dict, search_config: dict) -> str:
     patterns = cfg.get('accept_patterns', [])
     city_list = ', '.join(patterns) if patterns else personal.get('city', 'Hyderabad')
     return f"""== LOCATION CHECK (before any form) ==
-Candidate is based in India and can relocate within India. Preferred onsite/hybrid locations: {city_list}.
+Candidate is based in India, can relocate within India and to the UAE. Preferred onsite/hybrid locations: {city_list}.
 - Fully remote is eligible only if the employer explicitly permits work from India or says worldwide/work from anywhere.
 - Remote roles restricted to another country are NOT eligible.
 - Hybrid/onsite in a listed preferred Indian location is eligible.
 - Hybrid/onsite elsewhere in India: stop for manual review; do not assume.
-- Hybrid/onsite outside India: NOT ELIGIBLE.
+- UAE (Dubai, Abu Dhabi, remote or onsite based in the UAE) is ELIGIBLE as a secondary target. Candidate has NO UAE work authorisation and needs employer visa sponsorship: answer sponsorship questions for UAE roles YES, authorised to work in UAE NO.
+- Hybrid/onsite in any other country: NOT ELIGIBLE.
 - If remote country eligibility or location is unclear, stop for manual review.
 For ineligible roles output RESULT:FAILED:not_eligible_location.
 For unclear roles output RESULT:NEEDS_REVIEW:location_unclear.
@@ -88,8 +90,8 @@ def _build_screening_section(profile: dict) -> str:
     exp = profile.get('experience', {})
     auth = profile.get('work_authorization', {})
     return f"""== SCREENING QUESTIONS ==
-Candidate is based in {personal.get('city', 'Hyderabad')}, India; willing to relocate within India, not outside India.
-Work authorisation in India: {auth.get('legally_authorized_to_work', 'Not specified')}; sponsorship required in India: {auth.get('require_sponsorship', 'Not specified')}.
+Candidate is based in {personal.get('city', 'Hyderabad')}, India; willing to relocate within India and to the UAE (Dubai/Abu Dhabi).
+Work authorisation in India: {auth.get('legally_authorized_to_work', 'Not specified')}; sponsorship required in India: {auth.get('require_sponsorship', 'Not specified')}. For UAE roles: NOT authorised, sponsorship required: YES.
 Previously worked for this employer: YES for Microsoft and UIDAI; NO for other employers.
 Willing to undergo a background check: YES. If asked whether a past check failed or about adverse findings, do not infer.
 Felony history: NO, as confirmed by applicant.

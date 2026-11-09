@@ -12,6 +12,7 @@ Three-tier extraction cascade (cheapest first):
 
 import json
 import logging
+import random
 import re
 import sqlite3
 import time
@@ -25,7 +26,7 @@ from playwright.sync_api import sync_playwright
 from applypilot import config
 from applypilot.config import DB_PATH
 from applypilot.database import get_connection, init_db, ensure_columns
-from applypilot.llm import get_client
+from applypilot.llm import get_client_for
 
 log = logging.getLogger(__name__)
 
@@ -463,7 +464,7 @@ def extract_with_llm(page, url: str) -> dict:
     )
 
     try:
-        client = get_client()
+        client = get_client_for("LLM_ENRICH_MODEL")
         t0 = time.time()
         raw = client.ask(prompt, temperature=0.0, max_tokens=4096)
         elapsed = time.time() - t0
@@ -522,7 +523,13 @@ SITE_DELAYS = {
     "CareerJet Canada": 3.0,
     "Hacker News Jobs": 1.0,
     "BuiltIn Remote": 2.0,
+    "linkedin": 10.0,
 }
+
+# LinkedIn blocks anonymous detail fetches (429 / auth wall). Keep it gentle: small cap per pass,
+# stop the pass on the first block, and retry failed rows at most twice on later scans.
+LINKEDIN_MAX_PER_PASS = 15
+LINKEDIN_RETRY_STAGES = (None, "linkedin retry 1", "linkedin retry 2")   # then "no data extracted"
 
 RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
 PERMANENT_FAILURES = {404, 410, 451}
@@ -541,6 +548,10 @@ def scrape_detail_page(page, url: str) -> dict:
 
     try:
         resp = page.goto(url, timeout=45000)
+        if resp and resp.status == 429:
+            result["error"] = "rate_limited"
+            result["elapsed"] = time.time() - t0
+            return result
         if resp and resp.status in PERMANENT_FAILURES:
             result["error"] = f"HTTP {resp.status}"
             result["elapsed"] = time.time() - t0
@@ -560,6 +571,11 @@ def scrape_detail_page(page, url: str) -> dict:
         return result
 
     intel = collect_detail_intelligence(page)
+
+    if any(k in (intel.get("final_url") or "") for k in ("authwall", "/login", "/checkpoint", "/signup")):
+        result["error"] = "rate_limited"       # login wall: treat like a block
+        result["elapsed"] = time.time() - t0
+        return result
 
     # Tier 1: JSON-LD
     json_ld_result = extract_from_json_ld(intel)
@@ -619,6 +635,9 @@ def scrape_site_batch(
     """
     stats: dict = {"processed": 0, "ok": 0, "partial": 0, "error": 0, "tiers": {1: 0, 2: 0, 3: 0}}
 
+    if site == "linkedin":
+        max_jobs = min(max_jobs or LINKEDIN_MAX_PER_PASS, LINKEDIN_MAX_PER_PASS)
+
     if max_jobs:
         jobs = jobs[:max_jobs]
 
@@ -670,15 +689,29 @@ def scrape_site_batch(
                     )
                 else:
                     stats["error"] += 1
+                    err = result.get("error", "unknown")
+                    if site == "linkedin":
+                        row = conn.execute("SELECT detail_error FROM jobs WHERE url = ?", (url,)).fetchone()
+                        prev = row[0] if row else None
+                        if prev in LINKEDIN_RETRY_STAGES[1:-1]:
+                            err = LINKEDIN_RETRY_STAGES[LINKEDIN_RETRY_STAGES.index(prev) + 1]
+                        elif prev is None or prev == "no data extracted":
+                            err = LINKEDIN_RETRY_STAGES[1] if prev is None else prev
+                        else:
+                            err = "no data extracted"      # retry 2 failed: give up
                     conn.execute(
                         "UPDATE jobs SET detail_error = ?, detail_scraped_at = ? WHERE url = ?",
-                        (result.get("error", "unknown"), now, url),
+                        (err, now, url),
                     )
 
                 conn.commit()
 
+                if site == "linkedin" and result.get("error") == "rate_limited":
+                    log.warning("LinkedIn blocked us; stopping LinkedIn for this pass (retry next scan)")
+                    break
+
                 if i < len(jobs) - 1:
-                    time.sleep(delay)
+                    time.sleep(delay + (random.uniform(0, 5) if site == "linkedin" else 0))
 
             browser.close()
     finally:

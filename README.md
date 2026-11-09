@@ -21,7 +21,7 @@ git clone https://github.com/rjeevan2304/apply-pilot-Updated.git
 cd apply-pilot-Updated
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-pip install python-jobspy   # job discovery backend
+pip install 'python-jobspy>=1.4.1'   # job discovery backend (Indeed, LinkedIn, Naukri)
 playwright install chromium
 ```
 
@@ -40,11 +40,137 @@ Then fill in `profile.json` (personal details, skills, resume facts), edit `sear
 
 Personal data (profile, resume, database, logs, tailored resumes) is never committed — see `.gitignore`.
 
-## Usage
+## Usage: shortlist + tailored resumes (apply manually)
+
+This fork is set up to **find jobs and tailor resumes only**; you apply yourself.
 
 ```bash
-applypilot --help
+applypilot cycle                 # discover -> enrich -> score -> tailor -> pdf -> export
+applypilot export                # just refresh the shortlist from what's already done
+applypilot export --min-score 6  # include weaker matches
 ```
+
+Output (updated in place on every run):
+
+```
+~/.applypilot/shortlist/
+  shortlist.csv     company, title, location, score, apply_url, ... (open in Sheets/Excel)
+  shortlist.md      same list as a table
+  jobs/<Company - Title [id]>/
+    Resume.pdf      tailored resume for this job
+    Cover_Letter.*  only with `cycle --cover`
+    job.txt         apply link, why it fits, full job description
+```
+
+### Target companies (remote roles open to India)
+
+Besides job-board searches, discovery pulls openings straight from a list of companies'
+own job boards (Greenhouse, Lever, Ashby, Workable, Atlassian), configured in
+[`applypilot/config/companies.yaml`](applypilot/config/companies.yaml). Copy it to
+`~/.applypilot/companies.yaml` to edit the list.
+
+Only roles someone in India can take are kept: India locations, or remote roles marked
+worldwide / global / APAC, or plain "Remote" with no region. Roles limited to other regions
+(US, EMEA, "Americas only", ...), senior titles, managers (except Product Manager) and
+non-engineering/product functions are dropped. These roles come with full descriptions, so
+they go straight to scoring and tailoring.
+
+```bash
+applypilot companies                 # show matching roles per company (nothing saved)
+applypilot companies --csv roles.csv # also write them to a CSV
+applypilot companies --save          # add them to the database now (cycle does this too)
+```
+
+### UAE as a second region
+
+Copy `config/searches_uae.example.yaml` to `~/.applypilot/searches_uae.yaml` to also search
+Dubai / Abu Dhabi (delete the file to stop). Those jobs get `region = UAE` in the database and
+the shortlist CSV, and scoring doesn't penalise the visa sponsorship they need. UAE roles on
+the target-company boards are kept too.
+
+### Scoring and filtering rules
+
+- Titles: Business Analyst and Program/Project Manager are allowed; interns, trainees, sales,
+  recruiting, HR, marketing, data entry and senior titles (Senior/Snr/Lead/Staff/Principal/…, II+)
+  are dropped before scoring.
+- Years rule: if the smallest experience figure in a posting (text or Naukri URL, e.g.
+  `...-9-to-14-years-...`) is 5+ years, the score is capped at 3.
+
+### Rate limits (job boards)
+
+Searches run in batches with pauses, cool off after a 429/captcha and retry once. Tune in
+`searches.yaml` / `searches_uae.yaml`:
+
+```yaml
+batch_size: 5                     # searches per batch
+search_pause_seconds: 10          # pause between searches
+batch_pause_seconds: 120          # pause between batches
+rate_limit_cooldown_seconds: 300  # cool-off after a 429 / captcha
+max_total_cooldown_seconds: 3600  # cap on total cool-off per run
+time_budget_minutes: 240          # optional: stop searching after this long
+```
+
+LinkedIn detail pages are fetched at most 15 per pass with random delays; the pass stops at the
+first block or login wall, and a failed page is retried at most twice on later runs.
+
+### LLM: kie.ai with a fallback model
+
+In `~/.applypilot/.env`:
+
+```
+LLM_PROVIDER=kie
+KIE_API_KEY=...
+LLM_MODEL=claude-haiku-5-5        # main model
+LLM_FALLBACK_MODEL=deepseek-v4    # used when the main model hits a limit
+# optional per-stage models: LLM_SCORE_MODEL=..., LLM_ENRICH_MODEL=...
+```
+
+The fallback is used immediately when kie.ai reports a token, context-length, credit or quota
+limit (or the answer is cut off at the output-token limit), and after retries are exhausted on
+rate limits or server errors. At most 2 requests are in flight at once (`KIE_MAX_CONCURRENCY`).
+
+`applypilot cycle` never submits applications. The `apply` command (Claude Code + Chrome
+auto-apply) is still there but isn't needed.
+
+## Running on a Google Cloud VM
+
+Everything runs headless; no display or local machine needed.
+
+1. Create a Compute Engine VM (Debian 12 or Ubuntu 24.04; e2-small is enough). If you want
+   the CSV in Cloud Storage too, give the VM's service account **Storage Object Admin** on
+   your bucket and set the VM's access scope for Storage to **Read Write**.
+2. On the VM:
+
+   ```bash
+   git clone https://github.com/rjeevan2304/apply-pilot-Updated.git
+   cd apply-pilot-Updated
+   bash deploy/gcp/setup.sh gs://YOUR_BUCKET/applypilot   # bucket is optional
+   ```
+
+   This installs dependencies and headless Chromium, creates `~/.applypilot/`, and enables a
+   systemd timer that runs `applypilot cycle` every 6 hours (missed runs catch up after a reboot).
+3. Fill in `~/.applypilot/profile.json`, `resume.txt`, `searches.yaml` and `.env`
+   (`GEMINI_API_KEY=...`), then start a first run:
+
+   ```bash
+   sudo systemctl start applypilot-cycle.service
+   journalctl -fu applypilot-cycle
+   ```
+
+Where the results are:
+
+- On the VM: `~/.applypilot/shortlist/shortlist.csv`. Fetch it with
+  `gcloud compute scp VM_NAME:~/.applypilot/shortlist/shortlist.csv .`
+- In Cloud Storage (if configured): `gs://YOUR_BUCKET/applypilot/shortlist.csv` plus each job's
+  folder. Browse it in the Cloud Console, or `gcloud storage cp -r gs://YOUR_BUCKET/applypilot .`
+
+Settings: change the bucket or add flags (`--min-score 6`, `--cover`, `--workers 2`) in
+`/etc/default/applypilot`; change the schedule in
+`/etc/systemd/system/applypilot-cycle.timer` and then run `sudo systemctl daemon-reload`.
+`shortlist.csv` is regenerated each run, so keep your own "applied" notes in a copy
+(e.g. a Google Sheet that imports it), not in the file itself.
+
+Without systemd (e.g. inside `tmux`): `applypilot cycle --loop-hours 6 --gcs gs://YOUR_BUCKET/applypilot`.
 
 ## License
 

@@ -322,6 +322,202 @@ def status() -> None:
     console.print()
 
 
+def _gcs_uri(gcs: Optional[str]) -> str:
+    """Resolve and validate the GCS destination (flag or APPLYPILOT_GCS_URI)."""
+    import os
+
+    uri = (gcs or os.environ.get("APPLYPILOT_GCS_URI", "")).strip()
+    if uri and (not uri.startswith("gs://") or len(uri) <= 5):
+        console.print(f"[red]Invalid GCS location:[/red] {uri!r} (expected gs://BUCKET or gs://BUCKET/PREFIX)")
+        raise typer.Exit(code=1)
+    return uri
+
+
+def _do_export(min_score: int, output: Optional[str], no_copy: bool, gcs: Optional[str],
+               quiet: bool = False) -> int:
+    """Export the shortlist (and optionally sync to GCS). Returns job count."""
+    from pathlib import Path
+
+    from applypilot.export import export_shortlist, sync_to_gcs
+
+    result = export_shortlist(
+        min_score=min_score,
+        output_dir=Path(output).expanduser() if output else None,
+        copy_files=not no_copy,
+    )
+
+    if not quiet and result["records"]:
+        table = Table(title=f"Shortlist ({result['count']} jobs)", header_style="bold cyan")
+        table.add_column("Score", justify="center")
+        table.add_column("Company", style="bold")
+        table.add_column("Role")
+        table.add_column("Location")
+        for r in result["records"]:
+            table.add_row(str(r["fit_score"]), r["company"], r["title"], r["location"])
+        console.print(table)
+    if not result["count"]:
+        console.print(
+            f"[yellow]No tailored resumes with score >= {min_score} yet.[/yellow] "
+            "Run: applypilot cycle"
+        )
+    console.print(f"[green]Shortlist ({result['count']} jobs) saved to[/green] {result['csv']}")
+
+    gcs_uri = _gcs_uri(gcs)
+    if gcs_uri:
+        uploaded = sync_to_gcs(result["dir"], gcs_uri)
+        console.print(f"[green]Synced to[/green] {gcs_uri} ({uploaded} file(s) uploaded)")
+    return result["count"]
+
+
+_GCS_HELP = "Also mirror the shortlist folder to gs://BUCKET/PREFIX (or set APPLYPILOT_GCS_URI)."
+
+
+@app.command()
+def export(
+    min_score: int = typer.Option(7, "--min-score", help="Only include jobs scored at least this."),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o",
+        help="Output folder (default: ~/.applypilot/shortlist or APPLYPILOT_EXPORT_DIR).",
+    ),
+    no_copy: bool = typer.Option(
+        False, "--no-copy", help="Only write shortlist.csv/.md; don't copy resumes into per-job folders.",
+    ),
+    gcs: Optional[str] = typer.Option(None, "--gcs", help=_GCS_HELP),
+) -> None:
+    """Export companies + tailored resumes for applying manually."""
+    _bootstrap()
+    _do_export(min_score, output, no_copy, gcs)
+
+
+@app.command()
+def cycle(
+    min_score: int = typer.Option(7, "--min-score", help="Minimum fit score to tailor and export."),
+    workers: int = typer.Option(1, "--workers", "-w", help="Parallel threads for discovery/enrichment."),
+    cover: bool = typer.Option(False, "--cover", help="Also generate cover letters (more LLM calls)."),
+    validation: str = typer.Option("normal", "--validation", help="strict | normal | lenient"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Shortlist folder."),
+    gcs: Optional[str] = typer.Option(None, "--gcs", help=_GCS_HELP),
+    loop_hours: float = typer.Option(
+        0, "--loop-hours",
+        help="Repeat forever every N hours (0 = run once; use with systemd/cron instead if possible).",
+    ),
+) -> None:
+    """Headless run for servers: discover -> enrich -> score -> tailor -> pdf -> export.
+
+    Never applies to anything. Safe to run from cron/systemd; overlapping runs
+    are prevented with a lock file.
+    """
+    import fcntl
+    import time as _time
+
+    _bootstrap()
+
+    from applypilot.config import APP_DIR, check_tier
+    from applypilot.pipeline import run_pipeline
+
+    check_tier(2, "AI scoring/tailoring")
+    _gcs_uri(gcs)  # fail fast on a bad bucket address before hours of work
+
+    from applypilot.config import PROFILE_PATH, RESUME_PATH
+    missing = [str(p) for p in (PROFILE_PATH, RESUME_PATH) if not p.exists()]
+    if missing:
+        console.print("[red]Missing required file(s):[/red] " + ", ".join(missing))
+        console.print("Copy config/profile.example.json and your resume.txt there first (see README).")
+        raise typer.Exit(code=1)
+    stages = ["discover", "enrich", "score", "tailor"] + (["cover"] if cover else []) + ["pdf"]
+
+    lock_file = open(APP_DIR / ".cycle.lock", "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        console.print("[yellow]Another 'applypilot cycle' is already running; exiting.[/yellow]")
+        raise typer.Exit(code=0)
+
+    while True:
+        started = _time.time()
+        log.info("Cycle start: stages=%s", ",".join(stages))
+        try:
+            result = run_pipeline(
+                stages=stages, min_score=min_score, workers=workers,
+                validation_mode=validation,
+            )
+            if result.get("errors"):
+                log.warning("Some stages reported errors: %s", result.get("errors"))
+        except Exception:
+            log.exception("Pipeline run failed; exporting whatever is ready")
+
+        # Always refresh the CSV, even if a stage failed part-way.
+        try:
+            _do_export(min_score, output, no_copy=False, gcs=gcs, quiet=True)
+        except Exception:
+            log.exception("Export/sync failed")
+            if not loop_hours:
+                raise typer.Exit(code=1)
+
+        if not loop_hours:
+            break
+        wait = max(0.0, loop_hours * 3600 - (_time.time() - started))
+        log.info("Cycle done in %.0f min; next run in %.0f min",
+                 (_time.time() - started) / 60, wait / 60)
+        _time.sleep(wait)
+
+
+@app.command()
+def companies(
+    all_levels: bool = typer.Option(False, "--all-levels", help="Don't drop senior/manager titles."),
+    csv_path: Optional[str] = typer.Option(None, "--csv", help="Also write the roles to this CSV file."),
+    save: bool = typer.Option(False, "--save", help="Store the roles in the database for scoring/tailoring."),
+) -> None:
+    """List open roles at your target companies (companies.yaml) that someone in India can take."""
+    _bootstrap()
+
+    import csv as _csv
+    from collections import defaultdict
+
+    from applypilot.discovery.companies import collect, companies_config_path, store_postings
+
+    console.print(f"[dim]Company list: {companies_config_path()}[/dim]")
+    postings, report = collect(all_levels=all_levels)
+
+    summary = Table(title="Target companies", header_style="bold cyan")
+    for col, just in (("Company", "left"), ("Board", "left"), ("Openings", "right"),
+                      ("Open to India", "right"), ("Matching roles", "right"), ("Note", "left")):
+        summary.add_column(col, justify=just)
+    for r in report:
+        note = r["error"] or ("no openings right now" if r["source"] and not r["total"] else "")
+        summary.add_row(r["company"], r["source"] or "-", str(r["total"]), str(r["eligible"]),
+                        str(r["kept"]), f"[yellow]{note}[/yellow]" if note else "")
+    console.print(summary)
+
+    by_company: dict[str, list] = defaultdict(list)
+    for p in postings:
+        by_company[p.company].append(p)
+    for name, items in by_company.items():
+        t = Table(title=f"{name} ({len(items)})", header_style="bold", title_justify="left")
+        t.add_column("Role")
+        t.add_column("Eligibility")
+        t.add_column("Link", overflow="fold")
+        for p in sorted(items, key=lambda x: (x.eligibility, x.title)):
+            t.add_row(p.title, p.eligibility, p.url)
+        console.print(t)
+
+    if csv_path:
+        from pathlib import Path
+        out = Path(csv_path).expanduser()
+        with out.open("w", newline="", encoding="utf-8") as fh:
+            w = _csv.writer(fh)
+            w.writerow(["company", "title", "eligibility", "location", "url", "apply_url", "posted_at"])
+            for p in postings:
+                w.writerow([p.company, p.title, p.eligibility, p.location, p.url, p.apply_url, p.posted_at or ""])
+        console.print(f"[green]Wrote {len(postings)} roles to[/green] {out}")
+
+    if save:
+        from applypilot.database import get_connection
+        new, existing = store_postings(get_connection(), postings)
+        console.print(f"[green]Saved:[/green] {new} new, {existing} already in the database. "
+                      "Run [bold]applypilot cycle[/bold] (or run score tailor pdf) to tailor resumes.")
+
+
 @app.command()
 def dashboard() -> None:
     """Generate and open the HTML dashboard in your browser."""
@@ -383,7 +579,11 @@ def doctor() -> None:
     has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
     has_openai = bool(os.environ.get("OPENAI_API_KEY"))
     has_local = bool(os.environ.get("LLM_URL"))
-    if has_gemini:
+    if os.environ.get("KIE_API_KEY") and os.environ.get("LLM_PROVIDER", "").strip().lower() == "kie":
+        fb = os.environ.get("LLM_FALLBACK_MODEL", "").strip() or "none"
+        results.append(("LLM API key", ok_mark,
+                        f"kie.ai ({os.environ.get('LLM_MODEL') or 'claude-haiku-5-5'}, fallback: {fb})"))
+    elif has_gemini:
         model = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
         results.append(("LLM API key", ok_mark, f"Gemini ({model})"))
     elif has_openai:

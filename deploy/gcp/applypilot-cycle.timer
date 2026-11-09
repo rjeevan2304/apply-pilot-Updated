@@ -1,0 +1,13 @@
+[Unit]
+Description=Run ApplyPilot cycle every 6 hours
+
+[Timer]
+# 00:00, 06:00, 12:00, 18:00 VM time. Edit and run `sudo systemctl daemon-reload` to change.
+OnCalendar=*-*-* 00/6:00:00
+# Run a missed cycle after the VM was stopped/rebooted.
+Persistent=true
+RandomizedDelaySec=10min
+Unit=applypilot-cycle.service
+
+[Install]
+WantedBy=timers.target

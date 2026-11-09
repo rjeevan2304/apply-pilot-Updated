@@ -5,6 +5,8 @@ Auto-detects provider from environment:
   GEMINI_API_KEY  -> Google Gemini (default: gemini-2.0-flash)
   OPENAI_API_KEY  -> OpenAI (default: gpt-4o-mini)
   LLM_URL         -> Local llama.cpp / Ollama compatible endpoint
+  LLM_PROVIDER=kie + KIE_API_KEY -> kie.ai (Claude / DeepSeek), with
+                     LLM_FALLBACK_MODEL used on token/credit limits
 
 LLM_MODEL env var overrides the model name for any provider.
 """
@@ -12,7 +14,9 @@ LLM_MODEL env var overrides the model name for any provider.
 import logging
 import os
 import json
+import random
 import subprocess
+import threading
 import time
 
 import httpx
@@ -149,6 +153,168 @@ class ClaudeCLIClient:
         pass
 
 
+class KieLimitError(RuntimeError):
+    """kie.ai refused the request because of a token, context or credit limit."""
+
+
+# Phrases kie.ai / upstream models use when a limit (not a transient error) is hit.
+_LIMIT_HINTS = (
+    "token", "context length", "context_length", "too long", "max_tokens", "maximum context",
+    "credit", "insufficient", "balance", "quota", "exceeded your", "limit exceeded",
+)
+
+
+def _is_limit_error(status: int, text: str) -> bool:
+    if status in (402, 413):
+        return True
+    if status in (400, 403, 422, 429):
+        low = text.lower()
+        return any(h in low for h in _LIMIT_HINTS)
+    return False
+
+
+class KieClaudeClient:
+    """kie.ai client (Claude via the Messages API, other models via the Responses API).
+
+    POST https://api.kie.ai/claude/v1/messages with Bearer auth. kie.ai can
+    return errors as HTTP 200 with a `code` field in the body, so check both.
+
+    Fallback (LLM_FALLBACK_MODEL): used immediately when the request hits a
+    token/context/credit limit, and after retries are exhausted on rate limits
+    or server errors.
+    """
+
+    def __init__(self, model: str, api_key: str, url: str = "") -> None:
+        self.model = model
+        self.api_key = api_key
+        # DeepSeek on kie.ai uses the OpenAI Responses API; Claude uses Messages.
+        self.responses_api = not self.model.lower().startswith("claude")
+        default = ("https://api.kie.ai/openai/v1/responses" if self.responses_api
+                   else "https://api.kie.ai/claude/v1/messages")
+        self.url = url or default
+        self._client = httpx.Client(timeout=_TIMEOUT)
+        self._is_fallback = False
+
+    def _fallback(self, messages: list[dict], temperature: float, max_tokens: int, reason: str) -> str | None:
+        fb = os.environ.get("LLM_FALLBACK_MODEL", "").strip()
+        if not fb or fb == self.model or self._is_fallback:
+            return None
+        log.warning("kie.ai %s failed (%s); falling back to %s", self.model, reason[:160], fb)
+        return _fallback_client(fb, self.api_key).chat(messages, temperature=temperature, max_tokens=max_tokens)
+
+    def chat(self, messages: list[dict], temperature: float = 0.0, max_tokens: int = 4096) -> str:
+        system = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
+        convo = [{"role": m["role"], "content": m.get("content", "")}
+                 for m in messages if m.get("role") in ("user", "assistant")]
+        if self.responses_api:
+            payload: dict = {
+                "model": self.model,
+                "input": convo,
+                # reasoning tokens count against this limit (thinking is on by default)
+                "max_output_tokens": max_tokens + 4096,
+                "stream": False,
+            }
+            if system:
+                payload["instructions"] = system
+        else:
+            payload = {
+                "model": self.model,
+                "messages": convo,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": False,
+            }
+            if system:
+                payload["system"] = system
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+
+        last_err = "unknown"
+        for attempt in range(_KIE_RETRIES):
+            try:
+                with _KIE_SLOTS:  # cap in-flight requests; kie.ai 429s on too many pending
+                    resp = self._client.post(self.url, json=payload, headers=headers)
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_err = f"{type(exc).__name__}"
+                time.sleep(_kie_backoff(attempt))
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+            code = data.get("code") if isinstance(data, dict) else None
+            status = code if isinstance(code, int) and code != 200 else resp.status_code
+
+            # Token / context / credit limits: retrying the same model won't help.
+            if _is_limit_error(status, resp.text):
+                last_err = f"limit (HTTP/code {status}): {resp.text[:200]}"
+                result = self._fallback(messages, temperature, max_tokens, last_err)
+                if result is not None:
+                    return result
+                raise KieLimitError(f"kie.ai {self.model} hit a limit: {resp.text[:500]}")
+
+            if status in (429, 500, 502, 503, 504):
+                last_err = f"HTTP/code {status}: {resp.text[:200]}"
+                time.sleep(_kie_backoff(attempt, resp.headers.get("Retry-After")))
+                continue
+            if status != 200:
+                raise RuntimeError(f"kie.ai error {status}: {resp.text[:500]}")
+            body = data.get("data", data) if isinstance(data, dict) else {}
+
+            # Output cut off by the token limit (Responses API) with nothing usable.
+            incomplete = (body.get("incomplete_details") or {}) if isinstance(body, dict) else {}
+            truncated = (isinstance(body, dict) and body.get("status") == "incomplete"
+                         and "token" in str(incomplete.get("reason", "")).lower())
+
+            if isinstance(body, dict) and isinstance(body.get("output"), list):
+                text = "".join(
+                    c.get("text", "")
+                    for item in body["output"] if isinstance(item, dict) and item.get("type") == "message"
+                    for c in (item.get("content") or []) if isinstance(c, dict) and c.get("type") in ("output_text", "text")
+                )
+                if text.strip():
+                    return text.strip()
+                # Some responses carry the answer only inside a reasoning item.
+                text = "".join(
+                    c.get("text", "")
+                    for item in body["output"] if isinstance(item, dict) and item.get("type") == "reasoning"
+                    for c in (item.get("content") or []) if isinstance(c, dict)
+                )
+                if text.strip() and not truncated:
+                    return text.strip()
+            if isinstance(body, dict) and isinstance(body.get("output_text"), str) and body["output_text"].strip():
+                return body["output_text"].strip()
+            blocks = body.get("content") if isinstance(body, dict) else None
+            if isinstance(blocks, list):
+                text = "".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type", "text") == "text")
+                if text.strip():
+                    return text.strip()
+            choices = body.get("choices") if isinstance(body, dict) else None
+            if choices:
+                return choices[0]["message"]["content"].strip()
+            if truncated:
+                last_err = f"output token limit reached: {incomplete}"
+                result = self._fallback(messages, temperature, max_tokens, last_err)
+                if result is not None:
+                    return result
+                raise KieLimitError(f"kie.ai {self.model} ran out of output tokens")
+            # Empty/incomplete body (e.g. status "incomplete" echoing the request): transient, retry.
+            last_err = f"unexpected response shape: {resp.text[:200]}"
+            time.sleep(_kie_backoff(attempt))
+            continue
+
+        # Retries exhausted: try the fallback model once, if configured and different.
+        result = self._fallback(messages, temperature, max_tokens, last_err)
+        if result is not None:
+            return result
+        raise RuntimeError(f"kie.ai request failed after retries: {last_err}")
+
+    def ask(self, prompt: str, **kwargs) -> str:
+        return self.chat([{"role": "user", "content": prompt}], **kwargs)
+
+    def close(self) -> None:
+        self._client.close()
+
+
 class GeminiQuotaExhausted(RuntimeError):
     """Raised when Gemini reports a hard daily/monthly quota or billing limit."""
 
@@ -173,6 +339,33 @@ def _is_hard_gemini_quota_error(resp: httpx.Response) -> bool:
 
 _MAX_RETRIES = 5
 _TIMEOUT = 120  # seconds
+
+# kie.ai client: more patient retries, jittered backoff, bounded concurrency.
+_KIE_RETRIES = int(os.environ.get("KIE_RETRIES", "7"))
+_KIE_SLOTS = threading.BoundedSemaphore(int(os.environ.get("KIE_MAX_CONCURRENCY", "2")))
+
+
+def _kie_backoff(attempt: int, retry_after: str | None = None) -> float:
+    """Seconds to wait before retry: honour Retry-After, else exponential (5s..90s) with jitter."""
+    if retry_after:
+        try:
+            return min(float(retry_after), 120.0)
+        except (TypeError, ValueError):
+            pass
+    base = min(5 * 2 ** attempt, 90)
+    return base * (0.75 + random.random() * 0.5)
+
+
+_fallback_clients: dict = {}
+
+
+def _fallback_client(model: str, api_key: str):
+    if model not in _fallback_clients:
+        c = KieClaudeClient(model, api_key, os.environ.get("KIE_URL", ""))
+        c._is_fallback = True
+        _fallback_clients[model] = c
+    return _fallback_clients[model]
+
 
 # Base wait on first 429/503 (doubles each retry, caps at 60s).
 # Gemini free tier is 15 RPM = 4s minimum between requests; 10s gives headroom.
@@ -414,6 +607,26 @@ class _GeminiCompatForbidden(Exception):
 _instance: LLMClient | None = None
 
 
+_model_clients: dict = {}
+
+
+def get_client_for(model_env: str):
+    """Client for a specific stage, e.g. get_client_for("LLM_SCORE_MODEL").
+
+    Uses the model named in that env var (kie.ai provider only); falls back to the default client.
+    """
+    model = os.environ.get(model_env, "").strip()
+    if not model or os.environ.get("LLM_PROVIDER", "").strip().lower() != "kie":
+        return get_client()
+    if model not in _model_clients:
+        key = os.environ.get("KIE_API_KEY", "")
+        if not key:
+            raise RuntimeError("KIE_API_KEY is not set in ~/.applypilot/.env")
+        log.info("LLM provider: kie.ai  model: %s  (%s)", model, model_env)
+        _model_clients[model] = KieClaudeClient(model, key, os.environ.get("KIE_URL", ""))
+    return _model_clients[model]
+
+
 def get_client():
     """Return the configured module-level LLM client singleton."""
     global _instance
@@ -423,6 +636,13 @@ def get_client():
             model = os.environ.get("CLAUDE_MODEL", "sonnet")
             log.info("LLM provider: Claude Code CLI  model: %s", model)
             _instance = ClaudeCLIClient(model)
+        elif provider == "kie":
+            key = os.environ.get("KIE_API_KEY", "")
+            if not key:
+                raise RuntimeError("LLM_PROVIDER=kie but KIE_API_KEY is not set in ~/.applypilot/.env")
+            model = os.environ.get("LLM_MODEL", "").strip() or "claude-haiku-5-5"
+            log.info("LLM provider: kie.ai  model: %s", model)
+            _instance = KieClaudeClient(model, key, os.environ.get("KIE_URL", ""))
         else:
             base_url, model, api_key = _detect_provider()
             log.info("LLM provider: %s  model: %s", base_url, model)
