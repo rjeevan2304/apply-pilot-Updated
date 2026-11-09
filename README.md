@@ -184,7 +184,7 @@ Everything runs headless; no display or local machine needed.
    Then start a first run:
 
    ```bash
-   sudo systemctl start applypilot-cycle.service
+   sudo systemctl start --no-block applypilot-cycle.service
    journalctl -fu applypilot-cycle
    ```
 
