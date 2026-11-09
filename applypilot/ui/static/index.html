@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ApplyPilot Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+    --accent: #2f6fed; --accent-soft: #e8f0fe; --row-hover: #f2f5fb; --sel: #e8f0fe;
+    --green: #16a34a; --yellow: #d4a106; --red: #dc2626; --pink: #db2777; --none: #b6bcc8;
+    --bar: #2f6fed; --warn-bg: #fff6e0; --warn: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b; --panel: #1a1f27; --text: #e6e9ef; --muted: #98a1b3; --line: #2a313c;
+      --accent: #6d9cff; --accent-soft: #23314d; --row-hover: #212835; --sel: #23314d;
+      --none: #4b5363; --bar: #6d9cff; --warn-bg: #3a2f12; --warn: #f3c969;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .src { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+  header .spacer { flex: 1; }
+  nav { display: flex; gap: 4px; }
+  nav button, .btn { border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    padding: 6px 12px; border-radius: 8px; cursor: pointer; font: inherit; }
+  nav button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .btn:hover, nav button:hover { border-color: var(--accent); }
+  main { padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.dim td { color: var(--muted); }
+  .runbox { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .pulse { width: 12px; height: 12px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 var(--green);
+    animation: pulse 1.6s infinite; }
+  .idle { width: 12px; height: 12px; border-radius: 50%; background: var(--none); }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,.6); } 70% { box-shadow: 0 0 0 10px rgba(22,163,74,0); } 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); } }
+  .muted { color: var(--muted); }
+  .warn { background: var(--warn-bg); color: var(--warn); padding: 8px 10px; border-radius: 8px; margin-top: 10px; }
+  .bar { height: 10px; background: var(--bar); border-radius: 5px; min-width: 2px; }
+  /* Jobs */
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .toolbar input, .toolbar select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); color: var(--text); font: inherit; }
+  .toolbar input { flex: 1; min-width: 180px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); cursor: pointer; font-size: 13px; color: var(--text); }
+  .chip.on { border-color: var(--accent); background: var(--accent-soft); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; border: 2px solid transparent; }
+  .dot.apply { background: var(--green); } .dot.retry { background: var(--yellow); }
+  .dot.no { background: var(--red); } .dot.lowpay { background: var(--pink); }
+  .dot.none { background: transparent; border-color: var(--none); }
+  .split { display: grid; grid-template-columns: minmax(320px, 42%) 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+  .list { max-height: calc(100vh - 190px); overflow: auto; padding: 0; }
+  .job { display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; align-items: center;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .job:hover { background: var(--row-hover); } .job.sel { background: var(--sel); }
+  .job .idx { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 2.5ch; text-align: right; }
+  .job .t { font-weight: 600; } .job .c { font-size: 12px; color: var(--muted); }
+  .score { font-weight: 700; padding: 2px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
+  .detail { position: sticky; top: 70px; }
+  .detail h2 { font-size: 18px; margin-bottom: 2px; }
+  .decisions { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+  .dbtn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+  .dbtn.on.apply { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
+  .dbtn.on.retry { border-color: var(--yellow); box-shadow: inset 0 0 0 1px var(--yellow); }
+  .dbtn.on.no { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); }
+  .dbtn.on.lowpay { border-color: var(--pink); box-shadow: inset 0 0 0 1px var(--pink); }
+  textarea { width: 100%; min-height: 54px; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); color: var(--text); font: inherit; resize: vertical; }
+  .meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 10px 0; }
+  .meta dt { color: var(--muted); } .meta dd { margin: 0; overflow-wrap: anywhere; }
+  .links { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
+  a.btn { text-decoration: none; display: inline-block; }
+  a.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .subtabs { display: flex; gap: 4px; margin: 14px 0 8px; border-bottom: 1px solid var(--line); }
+  .subtabs button { border: 0; background: none; color: var(--muted); padding: 8px 10px; cursor: pointer; font: inherit;
+    border-bottom: 2px solid transparent; }
+  .subtabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  iframe { width: 100%; height: calc(100vh - 330px); min-height: 480px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 0; }
+  .empty { padding: 30px; text-align: center; color: var(--muted); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; gap: 6px; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ApplyPilot</h1>
+  <nav>
+    <button id="tab-status" class="active" onclick="showTab('status')">Status</button>
+    <button id="tab-jobs" onclick="showTab('jobs')">Jobs <span id="jobcount" class="muted"></span></button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="src" id="src"></span>
+  <button class="btn" onclick="refresh()" id="refreshBtn">↻ Refresh</button>
+</header>
+
+<main>
+  <!-- STATUS -->
+  <section id="view-status">
+    <div class="card" style="margin-bottom:16px">
+      <div class="runbox" id="run"></div>
+      <div id="runwarn"></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Pipeline overview</h2><table id="overview"></table></div>
+      <div class="card"><h2>Score distribution</h2><table id="dist"></table></div>
+      <div class="card"><h2>Jobs by source</h2><table id="sources"></table></div>
+      <div class="card"><h2>By region</h2><table id="regions"></table></div>
+    </div>
+  </section>
+
+  <!-- JOBS -->
+  <section id="view-jobs" hidden>
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="Search company, role, location…" oninput="renderJobs()">
+      <select id="region" onchange="renderJobs()"><option value="">All regions</option></select>
+      <span id="chips"></span>
+    </div>
+    <div class="legend" style="margin:-4px 0 12px">
+      <span><i class="dot apply"></i>Apply</span>
+      <span><i class="dot retry"></i>Retry</span>
+      <span><i class="dot no"></i>Cannot apply / not relevant / closed</span>
+      <span><i class="dot lowpay"></i>Low pay / do not apply</span>
+      <span><i class="dot none"></i>Not marked</span>
+    </div>
+    <div class="split">
+      <div class="card list" id="list"></div>
+      <div class="card detail" id="detail"><div class="empty">Select a job to see its details and tailored resume.</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const LABELS = {apply: "Apply", retry: "Retry", no: "Cannot apply / not relevant / closed", lowpay: "Low pay / do not apply"};
+const ORDER = ["apply", "retry", "no", "lowpay"];
+let JOBS = [], SEL = null, FILTER = "all", SUBTAB = "resume";
+const jobTextCache = {};
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = iso => { if (!iso) return "—"; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(); };
+const ago = iso => { if (!iso) return ""; const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.floor(m/60)} h ${m%60} min ago`; };
+const fileUrl = (folder, name, dl) => "/files/" + (folder + "/" + name).split("/").map(encodeURIComponent).join("/") + (dl ? "?download=1" : "");
+
+function showTab(t) {
+  for (const v of ["status", "jobs"]) {
+    document.getElementById("view-" + v).hidden = v !== t;
+    document.getElementById("tab-" + v).classList.toggle("active", v === t);
+  }
+  try { localStorage.setItem("ap-tab", t); } catch (e) {}
+}
+
+async function getJSON(u, opts) { const r = await fetch(u, opts); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+
+async function loadStatus() {
+  const d = await getJSON("/api/status");
+  document.getElementById("src").textContent = "Data: " + d.source + " · loaded " + fmt(d.loaded_at);
+  const s = d.status || {}, st = s.stats || {};
+  const run = document.getElementById("run"), warn = document.getElementById("runwarn");
+  warn.innerHTML = "";
+  if (!s.generated_at) {
+    run.innerHTML = `<span class="idle"></span><div><b>No status yet.</b> <span class="muted">status.json appears after the next run (or <code>applypilot export</code>) on the VM.</span></div>`;
+  } else if (s.running) {
+    const step = [s.stage, s.detail].filter(Boolean).join(" → ") || "starting";
+    run.innerHTML = `<span class="pulse"></span><div><b>Run in progress:</b> ${esc(step)}<div class="muted">Started ${fmt(s.run_started_at)} · this step since ${fmt(s.stage_started_at)} · updated ${ago(s.generated_at)}</div></div>`;
+    if ((Date.now() - new Date(s.generated_at)) / 60000 > 20)
+      warn.innerHTML = `<div class="warn">No update for over 20 minutes; the run may have stopped. Check on the VM with <code>systemctl status applypilot-cycle.service</code>.</div>`;
+  } else {
+    run.innerHTML = `<span class="idle"></span><div><b>Idle.</b> <span class="muted">Last run finished ${fmt(s.last_run_finished_at)} (${ago(s.last_run_finished_at)}).</span></div>`;
+  }
+  const rows = [
+    ["Total jobs discovered", st.total], ["With full description", st.with_description],
+    ["Pending enrichment", st.pending_detail], ["Enrichment errors", st.detail_errors],
+    ["Scored by LLM", st.scored], ["Pending scoring", st.unscored],
+    ["Tailored resumes", st.tailored], ["Pending tailoring (7+)", st.untailored_eligible],
+    ["Cover letters", st.with_cover_letter],
+  ];
+  document.getElementById("overview").innerHTML =
+    rows.map(([k, v]) => `<tr><td>${k}</td><td class="num">${v ?? "—"}</td></tr>`).join("") +
+    `<tr class="dim"><td>Ready to apply / Applied (auto-apply, unused)</td><td class="num">${st.ready_to_apply ?? "—"} / ${st.applied ?? "—"}</td></tr>`;
+  const dist = st.score_distribution || [], max = Math.max(1, ...dist.map(x => x[1]));
+  document.getElementById("dist").innerHTML = dist.length
+    ? dist.map(([sc, n]) => `<tr><td style="width:3ch"><b>${sc}</b></td><td><div class="bar" style="width:${Math.round(n / max * 100)}%;background:${sc >= 7 ? "var(--green)" : sc >= 5 ? "var(--yellow)" : "var(--red)"}"></div></td><td class="num" style="width:6ch">${n}</td></tr>`).join("")
+    : `<tr><td class="muted">Nothing scored yet.</td></tr>`;
+  const src = st.by_site || [];
+  document.getElementById("sources").innerHTML = src.length
+    ? src.map(([k, v]) => `<tr><td>${esc(k || "Unknown")}</td><td class="num">${v}</td></tr>`).join("")
+    : `<tr><td class="muted">—</td></tr>`;
+  const reg = s.by_region || [];
+  document.getElementById("regions").innerHTML = reg.length
+    ? `<tr><th>Region</th><th class="num">Found</th><th class="num">Scored</th><th class="num">7+</th><th class="num">Resumes</th></tr>` +
+      reg.map(r => `<tr><td>${esc(r.region)}</td><td class="num">${r.total}</td><td class="num">${r.scored}</td><td class="num">${r.strong}</td><td class="num">${r.tailored}</td></tr>`).join("")
+    : `<tr><td class="muted">—</td></tr>`;
+  document.getElementById("jobcount").textContent = d.job_count ? `(${d.job_count})` : "";
+}
+
+async function loadJobs() {
+  JOBS = await getJSON("/api/jobs");
+  const regions = [...new Set(JOBS.map(j => j.region).filter(Boolean))].sort();
+  const sel = document.getElementById("region"), cur = sel.value;
+  sel.innerHTML = `<option value="">All regions</option>` + regions.map(r => `<option ${r === cur ? "selected" : ""}>${esc(r)}</option>`).join("");
+  renderJobs();
+  if (SEL) { const j = JOBS.find(x => x.job_url === SEL); if (j) renderDetail(j); }
+}
+
+function renderChips() {
+  const counts = {all: JOBS.length, none: JOBS.filter(j => !j.decision).length};
+  ORDER.forEach(k => counts[k] = JOBS.filter(j => j.decision === k).length);
+  const items = [["all", "All", ""], ["none", "Not marked", "none"], ...ORDER.map(k => [k, LABELS[k].split(" / ")[0], k])];
+  document.getElementById("chips").innerHTML = items.map(([k, label, dot]) =>
+    `<button class="chip ${FILTER === k ? "on" : ""}" onclick="FILTER='${k}';renderJobs()">${dot ? `<i class="dot ${dot}"></i>` : ""}${label} <span class="muted">${counts[k]}</span></button>`).join(" ");
+}
+
+function renderJobs() {
+  renderChips();
+  const q = document.getElementById("q").value.toLowerCase().trim(), reg = document.getElementById("region").value;
+  const shown = JOBS.filter(j =>
+    (FILTER === "all" || (FILTER === "none" ? !j.decision : j.decision === FILTER)) &&
+    (!reg || j.region === reg) &&
+    (!q || [j.company, j.title, j.location].join(" ").toLowerCase().includes(q)));
+  const list = document.getElementById("list");
+  if (!JOBS.length) { list.innerHTML = `<div class="empty">No shortlisted jobs yet. Jobs appear here once they score 7+ and get a tailored resume.</div>`; return; }
+  if (!shown.length) { list.innerHTML = `<div class="empty">No jobs match these filters.</div>`; return; }
+  list.innerHTML = shown.map(j => `
+    <div class="job ${j.job_url === SEL ? "sel" : ""}" onclick="selectJob('${encodeURIComponent(j.job_url)}')">
+      <i class="dot ${j.decision || "none"}" title="${esc(LABELS[j.decision] || "Not marked")}"></i>
+      <span class="idx">${j.index}</span>
+      <div><div class="t">${esc(j.company)} — ${esc(j.title)}</div>
+        <div class="c">${esc(j.region)} · ${esc(j.location || "—")}${j.note ? " · 📝" : ""}</div></div>
+      <span class="score">${esc(j.fit_score)}</span>
+    </div>`).join("");
+}
+
+function selectJob(encUrl) {
+  SEL = decodeURIComponent(encUrl);
+  renderJobs();
+  const j = JOBS.find(x => x.job_url === SEL);
+  if (j) renderDetail(j);
+}
+
+function parseJobTxt(t) {
+  const why = (t.match(/Why it fits:\n([\s\S]*?)\n\n-{10,}/) || [])[1] || "";
+  const desc = (t.split(/\n-{10,}\n/)[1] || "").trim();
+  return {why: why.trim(), desc};
+}
+
+async function renderDetail(j) {
+  const el = document.getElementById("detail");
+  const hasPdf = !!j.resume_pdf, resumeName = hasPdf ? "Resume.pdf" : "Resume.txt";
+  const cl = j.cover_letter ? "Cover_Letter." + j.cover_letter.split(".").pop() : null;
+  el.innerHTML = `
+    <h2>${esc(j.title)}</h2>
+    <div class="muted">${esc(j.company)} · ${esc(j.region)} · ${esc(j.location || "—")}</div>
+    <div class="decisions">
+      ${ORDER.map(k => `<button class="dbtn ${k} ${j.decision === k ? "on" : ""}" onclick="decide('${k}')"><i class="dot ${k}"></i>${LABELS[k]}</button>`).join("")}
+      <button class="dbtn" onclick="decide('')">Clear</button>
+    </div>
+    <textarea id="note" placeholder="Notes (saved automatically)…" onchange="saveNote()">${esc(j.note || "")}</textarea>
+    <div class="links">
+      <a class="btn primary" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply ↗</a>
+      ${j.job_url && j.job_url !== j.apply_url ? `<a class="btn" href="${esc(j.job_url)}" target="_blank" rel="noopener">Job listing ↗</a>` : ""}
+      ${j.folder ? `<a class="btn" href="${fileUrl(j.folder, resumeName, true)}">Download resume</a>` : ""}
+      ${j.folder && cl ? `<a class="btn" href="${fileUrl(j.folder, cl, true)}">Download cover letter</a>` : ""}
+    </div>
+    <dl class="meta">
+      <dt>Fit score</dt><dd><span class="score">${esc(j.fit_score)}</span> / 10</dd>
+      ${j.salary ? `<dt>Salary</dt><dd>${esc(j.salary)}</dd>` : ""}
+      <dt>Found</dt><dd>${fmt(j.discovered_at)}</dd>
+      <dt>Resume tailored</dt><dd>${fmt(j.tailored_at)}</dd>
+    </dl>
+    <div class="subtabs">
+      <button id="st-resume" onclick="setSub('resume')">Tailored resume</button>
+      <button id="st-job" onclick="setSub('job')">Job details</button>
+    </div>
+    <div id="sub-resume"></div>
+    <div id="sub-job" hidden><div class="muted">Loading…</div></div>`;
+  const res = document.getElementById("sub-resume");
+  if (!j.folder) res.innerHTML = `<div class="empty">No resume file for this job.</div>`;
+  else if (hasPdf) res.innerHTML = `<iframe src="${fileUrl(j.folder, resumeName)}" title="Tailored resume"></iframe>`;
+  else { res.innerHTML = `<div class="muted">Loading…</div>`;
+    fetch(fileUrl(j.folder, resumeName)).then(r => r.ok ? r.text() : "").then(t => res.innerHTML = t ? `<pre>${esc(t)}</pre>` : `<div class="empty">Resume not found.</div>`); }
+  setSub(SUBTAB);
+  if (j.folder) {
+    const key = j.folder;
+    const t = jobTextCache[key] ?? await fetch(fileUrl(j.folder, "job.txt")).then(r => r.ok ? r.text() : "");
+    jobTextCache[key] = t;
+    if (SEL !== j.job_url) return;
+    const {why, desc} = parseJobTxt(t);
+    document.getElementById("sub-job").innerHTML = t
+      ? `<h2>Why it fits</h2><pre>${esc(why || "—")}</pre><h2 style="margin-top:16px">Job description</h2><pre>${esc(desc || "—")}</pre>`
+      : `<div class="empty">Job details not found.</div>`;
+  }
+}
+
+function setSub(t) {
+  SUBTAB = t;
+  for (const v of ["resume", "job"]) {
+    const p = document.getElementById("sub-" + v), b = document.getElementById("st-" + v);
+    if (p) p.hidden = v !== t; if (b) b.classList.toggle("active", v === t);
+  }
+}
+
+async function postDecision(body) {
+  const j = JOBS.find(x => x.job_url === SEL); if (!j) return;
+  const e = await getJSON("/api/decision", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({url: j.job_url, ...body})});
+  j.decision = e.decision || null; j.note = e.note || "";
+  return j;
+}
+async function decide(k) { const j = await postDecision({decision: k}); if (j) { renderJobs(); renderDetail(j); } }
+async function saveNote() { await postDecision({note: document.getElementById("note").value}); renderJobs(); }
+
+async function refresh() {
+  const b = document.getElementById("refreshBtn"); b.disabled = true; b.textContent = "Refreshing…";
+  try { await getJSON("/api/refresh", {method: "POST", body: "{}"}); await Promise.all([loadStatus(), loadJobs()]); }
+  catch (e) { alert("Refresh failed: " + e.message); }
+  finally { b.disabled = false; b.textContent = "↻ Refresh"; }
+}
+
+(async () => {
+  try { showTab(localStorage.getItem("ap-tab") || "status"); } catch (e) { showTab("status"); }
+  await Promise.all([loadStatus(), loadJobs()]);
+  setInterval(() => getJSON("/api/refresh", {method: "POST", body: "{}"}).then(loadStatus).catch(() => {}), 120000);
+})();
+</script>
+</body>
+</html>

@@ -78,7 +78,9 @@ Done. Before the first run, fill in on this VM:
   ~/.applypilot/searches.yaml    queries + locations
   ~/.applypilot/.env             GEMINI_API_KEY=... (or another LLM provider)
 
-Run once now and watch it:   sudo systemctl start applypilot-cycle.service && journalctl -fu applypilot-cycle
+Run once now and watch it:   sudo systemctl start --no-block applypilot-cycle.service && journalctl -fu applypilot-cycle
 Next scheduled runs:         systemctl list-timers applypilot-cycle.timer
 Shortlist on the VM:         ~/.applypilot/shortlist/shortlist.csv
+Progress so far:             cd $REPO && .venv/bin/applypilot status
+(--no-block returns the prompt at once; the run continues in the background.)
 EOF

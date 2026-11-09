@@ -172,6 +172,13 @@ def export_shortlist(
     md_path = out / "shortlist.md"
     _atomic_write(md_path, "\n".join(lines) + "\n")
 
+    # Pipeline snapshot for the local dashboard (`applypilot ui`).
+    try:
+        from applypilot.statusfile import write_status
+        write_status(out, running=False)
+    except Exception:
+        log.warning("Could not write status.json", exc_info=True)
+
     return {"count": len(records), "dir": out, "csv": csv_path, "markdown": md_path,
             "records": records}
 
@@ -187,6 +194,16 @@ def _parse_gcs_uri(uri: str) -> tuple[str, str]:
     if not bucket:
         raise ValueError(f"Missing bucket name in {uri}")
     return bucket, prefix.strip("/")
+
+
+def upload_file_to_gcs(local_path: Path, gcs_uri: str, rel: str) -> None:
+    """Upload one file to gs://bucket/prefix/<rel> (used for the status heartbeat)."""
+    from google.cloud import storage
+
+    bucket_name, prefix = _parse_gcs_uri(gcs_uri)
+    blob = storage.Client().bucket(bucket_name).blob(f"{prefix}/{rel}" if prefix else rel)
+    blob.cache_control = "no-cache"
+    blob.upload_from_filename(str(local_path))
 
 
 def sync_to_gcs(local_dir: Path, gcs_uri: str) -> int:
@@ -240,7 +257,7 @@ def _sync(client, local_dir: Path, gcs_uri: str, bucket_name: str, prefix: str) 
             continue
         rel = path.relative_to(local_dir).as_posix()
         name = f"{prefix}/{rel}" if prefix else rel
-        always = rel in ("shortlist.csv", "shortlist.md")
+        always = rel in ("shortlist.csv", "shortlist.md", "status.json")
         if not always and name in remote_md5:
             local_md5 = base64.b64encode(hashlib.md5(path.read_bytes()).digest()).decode()
             if local_md5 == remote_md5[name]:

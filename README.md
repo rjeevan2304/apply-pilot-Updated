@@ -160,6 +160,28 @@ rate limits or server errors. At most 2 requests are in flight at once (`KIE_MAX
 `applypilot cycle` never submits applications. The `apply` command (Claude Code + Chrome
 auto-apply) is still there but isn't needed.
 
+## Local dashboard (`applypilot ui`)
+
+A page on your own computer with the pipeline status and every shortlisted job: details,
+apply/listing links, the tailored resume (PDF), and a colour label you set per job:
+green = apply, yellow = retry, red = cannot apply / not relevant / closed,
+pink = low pay / do not apply. Labels are saved in `~/.applypilot-ui/decisions.json` (and in
+the bucket as `decisions.json`, so they survive reinstalls).
+
+The VM writes `status.json` next to `shortlist.csv` during and after every run; the dashboard
+reads both straight from your bucket. On your Mac (Python 3.11+):
+
+```bash
+git clone https://github.com/rjeevan2304/apply-pilot-Updated.git && cd apply-pilot-Updated
+python3 -m venv .venv && .venv/bin/pip install google-cloud-storage
+gcloud auth application-default login     # once; needs the Google Cloud CLI
+.venv/bin/python -m applypilot.ui --gcs gs://YOUR_BUCKET/applypilot
+```
+
+It opens http://127.0.0.1:8765 (only reachable from your own computer). Without the Cloud
+CLI, download the bucket's `applypilot/` folder and use `--dir path/to/applypilot` instead.
+If ApplyPilot is fully installed, `applypilot ui --gcs gs://...` does the same.
+
 ## Running on a Google Cloud VM
 
 Everything runs headless; no display or local machine needed.
@@ -184,7 +206,7 @@ Everything runs headless; no display or local machine needed.
    Then start a first run:
 
    ```bash
-   sudo systemctl start applypilot-cycle.service
+   sudo systemctl start --no-block applypilot-cycle.service
    journalctl -fu applypilot-cycle
    ```
 

@@ -389,6 +389,58 @@ def export(
     _do_export(min_score, output, no_copy, gcs)
 
 
+class _StatusHeartbeat:
+    """Refresh status.json (and its copy in the bucket) while a cycle runs.
+
+    Writes every 5 minutes, and within ~30 s of a stage change, so the local
+    dashboard can show what the run is doing. Never interrupts the run.
+    """
+
+    def __init__(self, output: Optional[str], gcs: Optional[str], every: float = 300.0) -> None:
+        import threading
+        from datetime import datetime
+        from pathlib import Path
+
+        from applypilot.export import default_export_dir
+
+        self.dir = Path(output).expanduser() if output else default_export_dir()
+        self.gcs = _gcs_uri(gcs)
+        self.every = every
+        self.started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="status-heartbeat", daemon=True)
+
+    def _write(self) -> None:
+        try:
+            from applypilot.statusfile import STATUS_FILE, write_status
+            path = write_status(self.dir, running=True, run_started_at=self.started_at)
+            if self.gcs:
+                from applypilot.export import upload_file_to_gcs
+                upload_file_to_gcs(path, self.gcs, STATUS_FILE)
+        except Exception:
+            log.debug("Status heartbeat failed", exc_info=True)
+
+    def _loop(self) -> None:
+        from applypilot.pipeline import PROGRESS
+
+        last_key = None
+        last_write = 0.0
+        while not self._stop.is_set():
+            key = (PROGRESS.get("stage"), PROGRESS.get("detail"))
+            import time as _t
+            if key != last_key or _t.time() - last_write >= self.every:
+                self._write()
+                last_key, last_write = key, _t.time()
+            self._stop.wait(30)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=60)
+
+
 @app.command()
 def cycle(
     min_score: int = typer.Option(7, "--min-score", help="Minimum fit score to tailor and export."),
@@ -436,6 +488,8 @@ def cycle(
     while True:
         started = _time.time()
         log.info("Cycle start: stages=%s", ",".join(stages))
+        heartbeat = _StatusHeartbeat(output, gcs)
+        heartbeat.start()
         try:
             result = run_pipeline(
                 stages=stages, min_score=min_score, workers=workers,
@@ -446,6 +500,7 @@ def cycle(
         except Exception:
             log.exception("Pipeline run failed; exporting whatever is ready")
 
+        heartbeat.stop()
         # Always refresh the CSV, even if a stage failed part-way.
         try:
             _do_export(min_score, output, no_copy=False, gcs=gcs, quiet=True)
@@ -516,6 +571,30 @@ def companies(
         new, existing = store_postings(get_connection(), postings)
         console.print(f"[green]Saved:[/green] {new} new, {existing} already in the database. "
                       "Run [bold]applypilot cycle[/bold] (or run score tailor pdf) to tailor resumes.")
+
+
+@app.command()
+def ui(
+    gcs: Optional[str] = typer.Option(
+        None, "--gcs", help="Read from gs://BUCKET/PREFIX (default: APPLYPILOT_GCS_URI if set)."),
+    dir: Optional[str] = typer.Option(
+        None, "--dir", help="Read from a local shortlist folder (default ~/.applypilot/shortlist)."),
+    port: int = typer.Option(8765, "--port", help="Port for the local page."),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't open the browser."),
+) -> None:
+    """Local dashboard: pipeline status + shortlisted jobs with resumes and colour labels."""
+    from applypilot.config import load_env
+    from applypilot.ui.server import main as ui_main
+
+    load_env()
+    argv = ["--port", str(port)]
+    if gcs:
+        argv += ["--gcs", gcs]
+    elif dir:
+        argv += ["--dir", dir]
+    if no_open:
+        argv.append("--no-open")
+    ui_main(argv)
 
 
 @app.command()
