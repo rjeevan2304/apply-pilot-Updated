@@ -363,6 +363,14 @@ def _process_one(
         return {"employer": emp["name"], "query": search_text,
                 "found": 0, "new": 0, "existing": 0, "error": str(e)}
 
+    # Same title rules as the job boards (no senior/lead/intern/sales/...), applied
+    # before fetching details so skipped titles cost no requests.
+    from applypilot.discovery.filters import title_ok
+    kept = [j for j in jobs if title_ok(j.get("title"))]
+    if len(kept) < len(jobs):
+        log.info("%s: %d of %d skipped by title (senior/lead/etc.)", emp["name"], len(jobs) - len(kept), len(jobs))
+    jobs = kept
+
     if not jobs:
         return {"employer": emp["name"], "query": search_text,
                 "found": 0, "new": 0, "existing": 0}
