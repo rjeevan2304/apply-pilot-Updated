@@ -74,6 +74,20 @@ def _run_discover(workers: int = 1) -> dict:
         console.print(f"  [red]JobSpy error:[/red] {e}")
         stats["jobspy"] = f"error: {e}"
 
+    # JobSpy: optional second region (UAE) from searches_uae.yaml
+    from applypilot.config import load_uae_search_config
+    uae_cfg = load_uae_search_config()
+    if uae_cfg:
+        console.print("  [cyan]JobSpy UAE crawl...[/cyan]")
+        try:
+            from applypilot.discovery.jobspy import run_discovery
+            run_discovery(uae_cfg)
+            stats["jobspy_uae"] = "ok"
+        except Exception as e:
+            log.error("JobSpy UAE crawl failed: %s", e)
+            console.print(f"  [red]JobSpy UAE error:[/red] {e}")
+            stats["jobspy_uae"] = f"error: {e}"
+
     # Workday corporate scraper
     console.print("  [cyan]Workday corporate scraper...[/cyan]")
     try:

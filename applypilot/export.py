@@ -27,7 +27,7 @@ from applypilot.database import get_connection, job_company
 log = logging.getLogger(__name__)
 
 CSV_FIELDS = (
-    "company", "title", "location", "fit_score", "salary", "apply_url",
+    "company", "title", "region", "location", "fit_score", "salary", "apply_url",
     "job_url", "discovered_at", "tailored_at", "resume_pdf", "resume_txt",
     "cover_letter", "folder",
 )
@@ -114,6 +114,7 @@ def export_shortlist(
             job_txt = (
                 f"Company:   {company}\n"
                 f"Title:     {title}\n"
+                f"Region:    {job.get('region') or 'India'}\n"
                 f"Location:  {job.get('location') or ''}\n"
                 f"Score:     {job.get('fit_score')}/10\n"
                 f"Apply at:  {apply_url}\n"
@@ -128,6 +129,7 @@ def export_shortlist(
         records.append({
             "company": company,
             "title": title,
+            "region": job.get("region") or "India",
             "location": job.get("location") or "",
             "fit_score": job.get("fit_score"),
             "salary": job.get("salary") or "",
@@ -159,12 +161,12 @@ def export_shortlist(
         "",
         f"Updated {datetime.now():%Y-%m-%d %H:%M}",
         "",
-        "| # | Company | Role | Location | Score | Apply | Folder |",
-        "|---|---|---|---|---|---|---|",
+        "| # | Company | Role | Region | Location | Score | Apply | Folder |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for i, r in enumerate(records, 1):
         lines.append(
-            f"| {i} | {cell(r['company'])} | {cell(r['title'])} | {cell(r['location'])} "
+            f"| {i} | {cell(r['company'])} | {cell(r['title'])} | {cell(r['region'])} | {cell(r['location'])} "
             f"| {r['fit_score']} | [link]({r['apply_url']}) | {cell(r['folder'] or r['resume_pdf'] or r['resume_txt'])} |"
         )
     md_path = out / "shortlist.md"

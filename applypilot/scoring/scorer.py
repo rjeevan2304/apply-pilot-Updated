@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from applypilot.config import RESUME_PATH, load_profile
 from applypilot.database import get_connection, get_jobs_by_stage, job_company
-from applypilot.llm import GeminiQuotaExhausted, get_client
+from applypilot.llm import GeminiQuotaExhausted, get_client_for
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ IMPORTANT FACTORS:
 - Consider transferable experience (automation, scripting, API work)
 - Factor in the candidate's project experience
 - Be realistic about experience level vs. job requirements (years of experience, seniority)
+- UAE JOBS (location in Dubai, Abu Dhabi or elsewhere in the UAE, onsite or remote, are acceptable): the candidate needs employer visa sponsorship, like almost every applicant. Do not penalize for visa, residence or NOC requirements at all. Judge role field and seniority exactly as for India.
 
 RESPOND IN EXACTLY THIS FORMAT (no other text):
 SCORE: [1-10]
@@ -93,7 +94,7 @@ def score_job(resume_text: str, job: dict) -> dict:
     ]
 
     try:
-        client = get_client()
+        client = get_client_for("LLM_SCORE_MODEL")
         response = client.chat(messages, max_tokens=512, temperature=0.2)
         return _parse_score_response(response)
     except GeminiQuotaExhausted:
@@ -101,6 +102,39 @@ def score_job(resume_text: str, job: dict) -> dict:
     except Exception as e:
         log.error("LLM error scoring job '%s': %s", job.get("title", "?"), e)
         return {"score": 0, "keywords": "", "reasoning": f"LLM error: {e}"}
+
+
+_YEARS_PATTERNS = (
+    re.compile(r"(?<![\d.])(\d{1,2})\s*\+?\s*(?:to|-|\u2013|\u2014)\s*(\d{1,2})\s*\+?\s*(?:years?|yrs?)", re.I),
+    re.compile(r"(?<![\d.])(\d{1,2})\s*\+\s*(?:years?|yrs?)", re.I),
+    re.compile(r"(?:minimum|min\.?|at\s*least)\s*(?:of\s*)?(?<![\d.])(\d{1,2})\s*(?:years?|yrs?)", re.I),
+    re.compile(r"(?<![\d.])(\d{1,2})\s*(?:years?|yrs?)\s*(?:of\s*)?(?:relevant\s*|professional\s*|hands-on\s*|total\s*)?(?:experience|exp\b)", re.I),
+)
+
+
+def min_years_required(title: str | None, url: str | None, description: str | None) -> int | None:
+    """Smallest years-of-experience figure stated in the posting (None if none found).
+
+    Using the smallest figure keeps this conservative: a posting that also says "2+ years" is not flagged.
+    Naukri URLs carry the range too ("...-9-to-14-years-...").
+    """
+    text = f"{title or ''} {(url or '').replace('-', ' ')} {description or ''}"
+    found = []
+    for pat in _YEARS_PATTERNS:
+        for m in pat.finditer(text):
+            n = int(m.group(1))
+            if 0 < n <= 30:
+                found.append(n)
+    return min(found) if found else None
+
+
+def _apply_years_rule(result: dict, job: dict) -> dict:
+    """Hard seniority check: postings whose smallest stated experience is 5+ years score at most 3."""
+    yrs = min_years_required(job.get("title"), job.get("url"), job.get("full_description"))
+    if yrs is not None and yrs >= 5 and result["score"] > 3:
+        result["reasoning"] = f"(Capped from {result['score']}: posting asks for {yrs}+ years.) " + result["reasoning"]
+        result["score"] = 3
+    return result
 
 
 def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
@@ -155,6 +189,8 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
             break
 
         completed += 1
+        if result["score"] != 0:
+            result = _apply_years_rule(result, job)
 
         if result["score"] == 0:
             errors += 1

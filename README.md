@@ -81,6 +81,54 @@ applypilot companies --csv roles.csv # also write them to a CSV
 applypilot companies --save          # add them to the database now (cycle does this too)
 ```
 
+### UAE as a second region
+
+Copy `config/searches_uae.example.yaml` to `~/.applypilot/searches_uae.yaml` to also search
+Dubai / Abu Dhabi (delete the file to stop). Those jobs get `region = UAE` in the database and
+the shortlist CSV, and scoring doesn't penalise the visa sponsorship they need. UAE roles on
+the target-company boards are kept too.
+
+### Scoring and filtering rules
+
+- Titles: Business Analyst and Program/Project Manager are allowed; interns, trainees, sales,
+  recruiting, HR, marketing, data entry and senior titles (Senior/Snr/Lead/Staff/Principal/…, II+)
+  are dropped before scoring.
+- Years rule: if the smallest experience figure in a posting (text or Naukri URL, e.g.
+  `...-9-to-14-years-...`) is 5+ years, the score is capped at 3.
+
+### Rate limits (job boards)
+
+Searches run in batches with pauses, cool off after a 429/captcha and retry once. Tune in
+`searches.yaml` / `searches_uae.yaml`:
+
+```yaml
+batch_size: 5                     # searches per batch
+search_pause_seconds: 10          # pause between searches
+batch_pause_seconds: 120          # pause between batches
+rate_limit_cooldown_seconds: 300  # cool-off after a 429 / captcha
+max_total_cooldown_seconds: 3600  # cap on total cool-off per run
+time_budget_minutes: 240          # optional: stop searching after this long
+```
+
+LinkedIn detail pages are fetched at most 15 per pass with random delays; the pass stops at the
+first block or login wall, and a failed page is retried at most twice on later runs.
+
+### LLM: kie.ai with a fallback model
+
+In `~/.applypilot/.env`:
+
+```
+LLM_PROVIDER=kie
+KIE_API_KEY=...
+LLM_MODEL=claude-haiku-5-5        # main model
+LLM_FALLBACK_MODEL=deepseek-v4    # used when the main model hits a limit
+# optional per-stage models: LLM_SCORE_MODEL=..., LLM_ENRICH_MODEL=...
+```
+
+The fallback is used immediately when kie.ai reports a token, context-length, credit or quota
+limit (or the answer is cut off at the output-token limit), and after retries are exhausted on
+rate limits or server errors. At most 2 requests are in flight at once (`KIE_MAX_CONCURRENCY`).
+
 `applypilot cycle` never submits applications. The `apply` command (Claude Code + Chrome
 auto-apply) is still there but isn't needed.
 

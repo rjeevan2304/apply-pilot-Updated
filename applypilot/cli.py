@@ -579,7 +579,11 @@ def doctor() -> None:
     has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
     has_openai = bool(os.environ.get("OPENAI_API_KEY"))
     has_local = bool(os.environ.get("LLM_URL"))
-    if has_gemini:
+    if os.environ.get("KIE_API_KEY") and os.environ.get("LLM_PROVIDER", "").strip().lower() == "kie":
+        fb = os.environ.get("LLM_FALLBACK_MODEL", "").strip() or "none"
+        results.append(("LLM API key", ok_mark,
+                        f"kie.ai ({os.environ.get('LLM_MODEL') or 'claude-haiku-5-5'}, fallback: {fb})"))
+    elif has_gemini:
         model = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
         results.append(("LLM API key", ok_mark, f"Gemini ({model})"))
     elif has_openai:

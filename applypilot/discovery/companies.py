@@ -3,7 +3,7 @@
 Reads ``companies.yaml`` (``~/.applypilot/companies.yaml``, else the packaged
 default), pulls every opening from each company's public applicant-tracking
 API (Greenhouse, Lever, Ashby, Workable, Atlassian), keeps roles a candidate
-in India can take (India-based, or remote worldwide/APAC/unrestricted), and
+in India can take (India-based, UAE-based, or remote worldwide/APAC/unrestricted), and
 stores them with full descriptions so they go straight to scoring.
 """
 
@@ -253,9 +253,11 @@ _TITLE_REGION = re.compile(
     r"(?i)\b(americas?|amer|namer|north america|latam|u\.?s\.?a?|united states|canada|"
     r"uk|u\.k\.|uki|emea|europe|eu|dach|germany|france|spain|nordics|taipei|taiwan|"
     r"singapore|japan|japanese|mandarin|korea|korean|australia|anz|brazil|mexico|philippines|"
-    r"china|chinese|ksa|uae|au|nz|sg|anz|new zealand|latin america)\b"
+    r"china|chinese|ksa|au|nz|sg|anz|new zealand|latin america)\b"
 )
-_TITLE_OPEN = re.compile(r"(?i)\b(india|apac|asia|global|worldwide)\b")
+_TITLE_OPEN = re.compile(r"(?i)\b(india|apac|asia|global|worldwide|uae|dubai|abu dhabi)\b")
+# Second target region: UAE roles (onsite or remote) are eligible; candidate needs visa sponsorship.
+_UAE = re.compile(r"(?i)\b(uae|u\.a\.e\.?|united arab emirates|dubai|abu dhabi|sharjah)\b")
 _FILLER = re.compile(r"\b(remote|home|based|work|from|or|and|hq|office|hybrid|wfh|distributed|telecommute|location|flexible)\b")
 
 
@@ -268,6 +270,9 @@ def classify_location(p: Posting) -> str:
         # Country codes like "IN" are case-sensitive; everything else isn't.
         if _INDIA.search(loc) or _INDIA.search(loc.lower()):
             labels.add("India")
+            continue
+        if _UAE.search(loc):
+            labels.add("UAE")
             continue
         low = loc.lower()
         is_remote = bool(_REMOTE.search(low)) or (p.remote is True)
@@ -283,12 +288,12 @@ def classify_location(p: Posting) -> str:
 
     # A role whose title pins it to another region isn't open to India,
     # even when the board also tags it "worldwide".
-    if not labels.intersection({"India"}) and _TITLE_REGION.search(p.title) \
+    if not labels.intersection({"India", "UAE"}) and _TITLE_REGION.search(p.title) \
             and not _TITLE_OPEN.search(p.title):
         return ""
     if labels == {"Remote - region not stated"} and restricted_elsewhere:
         return ""
-    for label in ("India", "Remote - worldwide", "Remote - APAC", "Remote - region not stated"):
+    for label in ("India", "Remote - worldwide", "Remote - APAC", "UAE", "Remote - region not stated"):
         if label in labels:
             return label
     return ""
@@ -360,10 +365,11 @@ def store_postings(conn: sqlite3.Connection, postings: list[Posting]) -> tuple[i
         try:
             conn.execute(
                 "INSERT INTO jobs (url, title, description, location, site, company, strategy, "
-                "discovered_at, full_description, application_url, detail_scraped_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "discovered_at, full_description, application_url, detail_scraped_at, region) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (p.url, p.title, p.description[:500], location, p.company, p.company,
-                 "company_board", now, p.description or None, p.apply_url, now),
+                 "company_board", now, p.description or None, p.apply_url, now,
+                 "UAE" if p.eligibility == "UAE" else None),
             )
             new += 1
         except sqlite3.IntegrityError:

@@ -154,6 +154,7 @@ _ALL_COLUMNS: dict[str, str] = {
     "site": "TEXT",
     "company": "TEXT",
     "strategy": "TEXT",
+    "region": "TEXT",          # NULL = India, "UAE" = second region
     "discovered_at": "TEXT",
     # Enrichment
     "full_description": "TEXT",

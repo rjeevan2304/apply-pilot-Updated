@@ -12,8 +12,8 @@
 # every supported ATS is tried and the first board that exists is used.
 #
 # Only roles that are open to someone in India are kept: India locations,
-# or remote roles marked worldwide / global / anywhere / APAC / Asia, or plain
-# "Remote" with no region. Remote roles limited to other regions
+# UAE locations (second target region), or remote roles marked worldwide /
+# global / anywhere / APAC / Asia, or plain "Remote" with no region. Remote roles limited to other regions
 # (US, EMEA, UK, ...) are dropped.
 
 companies:
