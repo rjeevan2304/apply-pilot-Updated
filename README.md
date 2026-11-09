@@ -118,9 +118,9 @@ first block or login wall, and a failed page is retried at most twice on later r
 In `~/.applypilot/.env`:
 
 ```
-GEMINI_API_KEY=...                 # main LLM (free tier)
+GEMINI_API_KEY=...                 # main LLM (free tier), model gemini-3.5-flash
 ANTHROPIC_API_KEY=...              # fallback LLM (Claude API, paid per use)
-# ANTHROPIC_MODEL=claude-opus-5-5  # default; e.g. claude-sonnet-5-5 or claude-haiku-5-5 cost less
+# ANTHROPIC_MODEL=claude-haiku-5-5 # default; claude-sonnet-5-5 / claude-opus-5-5 are stronger, cost more
 # ANTHROPIC_EFFORT=medium          # low | medium | high | xhigh | max
 ```
 

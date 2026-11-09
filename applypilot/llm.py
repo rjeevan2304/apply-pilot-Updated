@@ -2,7 +2,7 @@
 Unified LLM client for ApplyPilot.
 
 Auto-detects provider from environment:
-  GEMINI_API_KEY  -> Google Gemini (default: gemini-2.0-flash)
+  GEMINI_API_KEY  -> Google Gemini (default: gemini-3.5-flash)
   OPENAI_API_KEY  -> OpenAI (default: gpt-4o-mini)
   LLM_URL         -> Local llama.cpp / Ollama compatible endpoint
   ANTHROPIC_API_KEY -> Claude API: the automatic fallback when Gemini/OpenAI/local
@@ -44,7 +44,7 @@ def _detect_provider() -> tuple[str, str, str]:
     if gemini_key and not local_url:
         return (
             "https://generativelanguage.googleapis.com/v1beta/openai",
-            model_override or "gemini-2.0-flash",
+            model_override or "gemini-3.5-flash",
             gemini_key,
         )
 
@@ -639,7 +639,7 @@ _CLAUDE_MIN_MAX_TOKENS = 16000
 class AnthropicClient:
     """Claude via the official Anthropic SDK (ANTHROPIC_API_KEY).
 
-    Model: ANTHROPIC_MODEL (default claude-opus-5-5). Optional ANTHROPIC_EFFORT
+    Model: ANTHROPIC_MODEL (default claude-haiku-5-5). Optional ANTHROPIC_EFFORT
     (low | medium | high | xhigh | max) trades depth for cost.
     """
 
@@ -647,7 +647,7 @@ class AnthropicClient:
         import anthropic  # imported lazily so Gemini-only setups don't need it
 
         self._anthropic = anthropic
-        self.model = model or os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-opus-5-5"
+        self.model = model or os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-haiku-5-5"
         self.effort = os.environ.get("ANTHROPIC_EFFORT", "").strip() or None
         self._client = anthropic.Anthropic(api_key=api_key or None, max_retries=4)
 
