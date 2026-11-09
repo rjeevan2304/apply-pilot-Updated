@@ -22,7 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.1"]
 gcp = ["google-cloud-storage>=2.10"]
-jobspy = ["python-jobspy>=1.1"]
+jobspy = ["python-jobspy>=1.4.1"]
 
 [project.scripts]
 applypilot = "applypilot.cli:app"

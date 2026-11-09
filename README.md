@@ -21,7 +21,7 @@ git clone https://github.com/rjeevan2304/apply-pilot-Updated.git
 cd apply-pilot-Updated
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-pip install python-jobspy   # job discovery backend
+pip install 'python-jobspy>=1.4.1'   # job discovery backend (Indeed, LinkedIn, Naukri)
 playwright install chromium
 ```
 

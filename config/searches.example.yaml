@@ -7,7 +7,7 @@ defaults:
 sites:
 - indeed
 - linkedin
-- zip_recruiter
+- naukri
 locations:
 - label: Hyderabad
   location: Hyderabad, Telangana, India

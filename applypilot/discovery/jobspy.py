@@ -1,4 +1,4 @@
-"""JobSpy-based job discovery: searches Indeed, LinkedIn, Glassdoor, ZipRecruiter.
+"""JobSpy-based job discovery: searches Indeed, LinkedIn, Naukri (and optionally Glassdoor).
 
 Uses python-jobspy to scrape multiple job boards, deduplicates results,
 parses salary ranges, and stores everything in the ApplyPilot database.
@@ -214,7 +214,8 @@ def _run_one_search(
     # Split sites: Glassdoor needs simplified location, others use original
     gd_location = glassdoor_map.get(s["location"], s["location"].split(",")[0])
     has_glassdoor = "glassdoor" in sites
-    other_sites = [si for si in sites if si != "glassdoor"]
+    has_naukri = "naukri" in sites
+    other_sites = [si for si in sites if si not in ("glassdoor", "naukri")]
 
     all_dfs = []
 
@@ -235,12 +236,36 @@ def _run_one_search(
         if proxy_config:
             kwargs["proxies"] = [proxy_config["jobspy"]]
         if "linkedin" in other_sites:
-            kwargs["linkedin_fetch_description"] = True
+            kwargs["fetch_description"] = True
         try:
             df = _scrape_with_retry(kwargs, max_retries=max_retries)
             all_dfs.append(df)
         except Exception as e:
             log.error("[%s] (non-gd): %s", label, e)
+
+    # Run Naukri separately: it wants a bare city ("Hyderabad"), and remote
+    # searches use its work-from-home filter instead of a location.
+    if has_naukri:
+        nk_kwargs = {
+            "site_name": ["naukri"],
+            "search_term": s["query"],
+            "results_wanted": results_per_site,
+            "hours_old": hours_old,
+            "description_format": "markdown",
+            "fetch_description": True,  # search results have no description
+            "verbose": 0,
+        }
+        if s.get("remote"):
+            nk_kwargs["is_remote"] = True
+        else:
+            nk_kwargs["location"] = s["location"].split(",")[0].strip()
+        if proxy_config:
+            nk_kwargs["proxies"] = [proxy_config["jobspy"]]
+        try:
+            df = _scrape_with_retry(nk_kwargs, max_retries=max_retries)
+            all_dfs.append(df)
+        except Exception as e:
+            log.error("[%s] (naukri): %s", label, e)
 
     # Run Glassdoor separately with simplified location
     if has_glassdoor:
@@ -316,7 +341,7 @@ def search_jobs(
 ) -> dict:
     """Run a single job search via JobSpy and store results in DB."""
     if sites is None:
-        sites = ["indeed", "linkedin", "zip_recruiter"]
+        sites = ["indeed", "linkedin", "naukri"]
 
     proxy_config = parse_proxy(proxy) if proxy else None
 
@@ -339,8 +364,8 @@ def search_jobs(
     if proxy_config:
         kwargs["proxies"] = [proxy_config["jobspy"]]
 
-    if "linkedin" in sites:
-        kwargs["linkedin_fetch_description"] = True
+    if "linkedin" in sites or "naukri" in sites:
+        kwargs["fetch_description"] = True
 
     try:
         df = scrape_jobs(**kwargs)
@@ -384,7 +409,7 @@ def _full_crawl(
 ) -> dict:
     """Run all search queries from search config across all locations."""
     if sites is None:
-        sites = ["indeed", "linkedin", "zip_recruiter"]
+        sites = ["indeed", "linkedin", "naukri"]
 
     # Build search combinations from config
     queries = search_cfg.get("queries", [])

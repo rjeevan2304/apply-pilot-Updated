@@ -90,7 +90,7 @@ boards:
   - indeed
   - linkedin
   - glassdoor
-  - zip_recruiter
+  - naukri
   - google
 
 # Search defaults
