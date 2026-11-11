@@ -375,8 +375,7 @@ async function loadApps() {
 function renderApps() {
   const counts = {};
   APPS.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
-  const cutoff = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
-  APPS = APPS.filter(a => (a.date || "9999") >= cutoff);   // last two months only
+  APPS = APPS.filter(a => (a.date || "9999") >= "2026-10-01");   // from 1 October 2026 onwards
   document.getElementById("appcount").textContent = APPS.length ? `(${APPS.length})` : "";
   const chip = (key, label, color, n) =>
     `<button class="chip ${APP_FILTER === key ? "on" : ""}" onclick="APP_FILTER='${key}';renderApps()">
@@ -384,7 +383,7 @@ function renderApps() {
   document.getElementById("appsummary").innerHTML = APPS.length
     ? chip("all", "All", "var(--muted)", APPS.length) +
       Object.keys(APP_LABEL).filter(k => counts[k]).map(k => chip(k, APP_LABEL[k], APP_COLOR[k], counts[k])).join(" ")
-    : `<span class="muted">No applications in the last 2 months yet.</span>`;
+    : `<span class="muted">No applications since 1 October 2026 yet.</span>`;
   const shown = APPS.filter(a => APP_FILTER === "all" || a.status === APP_FILTER);
   document.getElementById("applist").innerHTML = shown.length
     ? `<table><tr><th>Date</th><th>Company</th><th>Role</th><th>Status</th></tr>` + shown.map(a =>

@@ -100,12 +100,9 @@ def test_government_notices_ignored():
     assert gs.build_records(msgs) == []
 
 
-def test_older_than_two_months_is_dropped():
-    from datetime import date, timedelta
-    old = (date.today() - timedelta(days=90)).isoformat()
-    new = (date.today() - timedelta(days=5)).isoformat()
+def test_before_october_is_dropped():
     msgs = [
-        {"threadId": "a", "subject": "Thank you for applying to Acme", "snippet": "", "from": "Acme <a@acme.com>", "date": old},
-        {"threadId": "b", "subject": "Thank you for applying to Beta", "snippet": "", "from": "Beta <a@beta.com>", "date": new},
+        {"threadId": "a", "subject": "Thank you for applying to Acme", "snippet": "", "from": "Acme <a@acme.com>", "date": "2026-09-20"},
+        {"threadId": "b", "subject": "Thank you for applying to Beta", "snippet": "", "from": "Beta <a@beta.com>", "date": "2026-10-03"},
     ]
     assert [r["company"] for r in gs.build_records(msgs)] == ["Beta"]

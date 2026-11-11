@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 
@@ -26,7 +26,7 @@ from applypilot import config
 log = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-WINDOW_DAYS = 60  # only applications from the last two months are shown
+SINCE = "2026-10-01"  # applications from this date onwards (no end date)
 CLIENT_FILE = config.APP_DIR / "gmail_client.json"
 TOKEN_FILE = config.APP_DIR / "gmail_token.json"
 REDIRECT = "http://localhost:8085/"
@@ -35,7 +35,7 @@ QUERY = (
     '(subject:(applying OR application OR applied OR "received your" OR interview OR '
     'unfortunately OR regret OR "not moving forward" OR offer OR "next steps" OR assessment OR '
     'test OR "status of your application" OR "update on your application" OR "thank you for your interest")) '
-    f"newer_than:{WINDOW_DAYS}d -in:spam -in:trash"
+    f"after:{SINCE.replace('-', '/')} -in:spam -in:trash"
 )
 
 REJECT_WORDS = ("rejection", "rejected", "unfortunately", "not moving forward", "not be considered", "regret to inform", "not able to proceed",
@@ -118,10 +118,9 @@ def build_records(messages: list[dict]) -> list[dict]:
     Newest status wins per (company, title). Emails with no recognisable title are kept one by one.
     """
     recs: dict = {}
-    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=WINDOW_DAYS)).isoformat()
     for m in sorted(messages, key=lambda x: x.get("date") or ""):
-        if (m.get("date") or "") and m["date"] < cutoff:
-            continue  # older than the window
+        if (m.get("date") or "") and m["date"] < SINCE:
+            continue  # before the start date
         display, address = parseaddr(m.get("from", ""))
         if address.lower().endswith(".gov.in"):
             continue  # government notices (e.g. apprenticeship attendance) aren't job applications
