@@ -141,6 +141,9 @@ def login() -> None:
     print("\n2) Your browser then shows an error page (that's expected). Copy the whole web address")
     print("   from its address bar (it starts with http://localhost:8085/?code=...) and paste it here:\n")
     response = input("Paste the address: ").strip()
+    # The redirect points at localhost on this machine, which the library treats as
+    # non-HTTPS. The code only goes from Google to this machine, so allow it here.
+    os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
     flow.fetch_token(authorization_response=response)
     creds = flow.credentials
     TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
