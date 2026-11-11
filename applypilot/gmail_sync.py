@@ -26,15 +26,16 @@ from applypilot import config
 log = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SINCE = "2026-10-01"  # applications from this date onwards (no end date)
 CLIENT_FILE = config.APP_DIR / "gmail_client.json"
 TOKEN_FILE = config.APP_DIR / "gmail_token.json"
 REDIRECT = "http://localhost:8085/"
 
 QUERY = (
     '(subject:(applying OR application OR applied OR "received your" OR interview OR '
-    'unfortunately OR regret OR "not moving forward" OR offer OR "next steps" OR '
-    '"status of your application" OR "update on your application" OR "thank you for your interest")) '
-    "newer_than:365d -in:spam -in:trash"
+    'unfortunately OR regret OR "not moving forward" OR offer OR "next steps" OR assessment OR '
+    'test OR "status of your application" OR "update on your application" OR "thank you for your interest")) '
+    f"after:{SINCE.replace('-', '/')} -in:spam -in:trash"
 )
 
 REJECT_WORDS = ("rejection", "rejected", "unfortunately", "not moving forward", "not be considered", "regret to inform", "not able to proceed",
@@ -42,7 +43,10 @@ REJECT_WORDS = ("rejection", "rejected", "unfortunately", "not moving forward", 
                 "unsuccessful", "not successful", "other candidates", "not proceed")
 OFFER_WORDS = ("offer letter", "pleased to offer", "job offer", "delighted to offer",
                "offer of employment", "we would like to offer")
-INTERVIEW_WORDS = ("interview", "assessment", "next steps", "schedule a call", "screening call")
+INTERVIEW_WORDS = ("interview", "schedule a call", "screening call", "call with the team", "meet the team")
+ASSESSMENT_WORDS = ("assessment", "online test", "coding test", "coding challenge", "hackerrank",
+                    "codility", "take-home", "take home", "online exam")
+NEXT_STEPS_WORDS = ("next steps", "next step", "we'd like to move forward", "moving you forward")
 APPLIED_WORDS = ("thank you for applying", "thanks for applying", "application received",
                  "received your application", "we've received", "we have received",
                  "application confirmation", "thank you for your application", "your application",
@@ -59,6 +63,10 @@ def classify(subject: str, snippet: str) -> str | None:
         return "offer"
     if any(w in text for w in INTERVIEW_WORDS):
         return "interview"
+    if any(w in text for w in ASSESSMENT_WORDS):
+        return "assessment"
+    if any(w in text for w in NEXT_STEPS_WORDS):
+        return "next_steps"
     if any(w in text for w in APPLIED_WORDS):
         return "applied"
     return None
@@ -111,10 +119,14 @@ def build_records(messages: list[dict]) -> list[dict]:
     """
     recs: dict = {}
     for m in sorted(messages, key=lambda x: x.get("date") or ""):
+        if (m.get("date") or "") and m["date"] < SINCE:
+            continue  # before the start date
+        display, address = parseaddr(m.get("from", ""))
+        if address.lower().endswith(".gov.in"):
+            continue  # government notices (e.g. apprenticeship attendance) aren't job applications
         status = classify(m.get("subject", ""), m.get("snippet", ""))
         if not status:
             continue
-        display, address = parseaddr(m.get("from", ""))
         company = company_from_sender(display, address)
         title = title_from_subject(m.get("subject", ""))
         date = (m.get("date") or "")[:10]

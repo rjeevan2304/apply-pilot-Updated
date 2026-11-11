@@ -11,7 +11,11 @@ from applypilot import gmail_sync as gs
     ("Application Rejection for the position -0472- Front End Developer", "We regret to inform you", "rejected"),
     ("Thank You for Applying to Brain Co.", "", "applied"),
     ("We’ve received your Target job application", "", "applied"),
-    ("Your IBM Application: Next Steps", "", "interview"),
+    ("Your IBM Application: Next Steps", "", "next_steps"),
+    ("SDE-I Online Assessment Invitation", "", "assessment"),
+    ("Please complete the coding assessment", "", "assessment"),
+    ("We'd like to schedule an interview", "", "interview"),
+    ("Apply for assessment for contract CN112540448", "Kindly apply for assessment.", "assessment"),  # gov.in notices are dropped in build_records
     ("Congratulations, we are delighted to offer you the role", "", "offer"),
     ("Creation of your account for Genpact application", "Your account has been created", None),
     ("Customer, your ₹750 voucher offer ends 31 Oct", "", None),
@@ -88,3 +92,17 @@ def test_not_connected_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(gs, "_credentials", lambda: None)
     with pytest.raises(RuntimeError, match="gmail-login"):
         gs.sync(out_dir=tmp_path)
+
+
+def test_government_notices_ignored():
+    msgs = [{"threadId": "g1", "subject": "Apply for assessment for contract", "snippet": "",
+             "from": "Apprenticeship India <no-reply@apprenticeshipindia.gov.in>", "date": "2026-11-03"}]
+    assert gs.build_records(msgs) == []
+
+
+def test_before_october_is_dropped():
+    msgs = [
+        {"threadId": "a", "subject": "Thank you for applying to Acme", "snippet": "", "from": "Acme <a@acme.com>", "date": "2026-09-20"},
+        {"threadId": "b", "subject": "Thank you for applying to Beta", "snippet": "", "from": "Beta <a@beta.com>", "date": "2026-10-03"},
+    ]
+    assert [r["company"] for r in gs.build_records(msgs)] == ["Beta"]

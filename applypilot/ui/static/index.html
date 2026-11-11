@@ -136,15 +136,7 @@
     <div class="card" style="margin-bottom:16px">
       <div class="runbox" id="appsummary"></div>
     </div>
-    <div class="split">
-      <div class="card list" id="applist"></div>
-      <div class="card detail">
-        <h2>Update from your email</h2>
-        <p class="muted" style="margin:0 0 8px">Paste the list you got from Claude (JSON starting with <code>{"applications": [</code>) and press Save. It replaces the list shown here. Only company, role, date, status and a short note are stored.</p>
-        <textarea id="appimport" style="min-height:200px;font-family:ui-monospace,monospace;font-size:12px" placeholder='{"applications": [{"company": "...", "title": "...", "date": "2026-11-05", "status": "rejected", "note": "..."}]}'></textarea>
-        <div class="decisions"><button class="dbtn" onclick="saveApps()">Save</button><span id="appmsg" class="muted"></span></div>
-      </div>
-    </div>
+    <div class="card" id="applist"></div>
   </section>
 
   <!-- JOBS -->
@@ -180,8 +172,8 @@ const ago = iso => { if (!iso) return ""; const m = Math.round((Date.now() - new
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.floor(m/60)} h ${m%60} min ago`; };
 const fileUrl = (folder, name, dl) => "/files/" + (folder + "/" + name).split("/").map(encodeURIComponent).join("/") + (dl ? "?download=1" : "");
 
-const APP_LABEL = {applied: "Applied", interview: "Interview", offer: "Offer", rejected: "Rejected", withdrawn: "Withdrawn"};
-const APP_COLOR = {applied: "var(--accent)", interview: "var(--green)", offer: "var(--green)", rejected: "var(--red)", withdrawn: "var(--muted)"};
+const APP_LABEL = {applied: "Applied", assessment: "Assessment", next_steps: "Next steps", interview: "Interview", offer: "Offer", rejected: "Rejected", withdrawn: "Withdrawn"};
+const APP_COLOR = {applied: "var(--accent)", assessment: "var(--yellow)", next_steps: "var(--yellow)", interview: "var(--green)", offer: "var(--green)", rejected: "var(--red)", withdrawn: "var(--muted)"};
 
 function showTab(t) {
   for (const v of ["status", "jobs", "apps"]) {
@@ -372,36 +364,33 @@ async function refresh() {
   finally { b.disabled = false; b.textContent = "↻ Refresh"; }
 }
 
+let APPS = [], APP_FILTER = "all";
+
 async function loadApps() {
-  const d = await getJSON("/api/applications");
-  const apps = (d.applications || []).slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  document.getElementById("appcount").textContent = apps.length ? `(${apps.length})` : "";
-  const counts = {};
-  apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
-  document.getElementById("appsummary").innerHTML = apps.length
-    ? Object.keys(APP_LABEL).filter(k => counts[k]).map(k =>
-        `<span class="chip" style="cursor:default"><i class="dot" style="background:${APP_COLOR[k]}"></i>${APP_LABEL[k]} <b>${counts[k]}</b></span>`).join(" ")
-    : `<span class="muted">No applications saved yet. Paste your email results below.</span>`;
-  document.getElementById("applist").innerHTML = apps.length
-    ? `<table><tr><th>Date</th><th>Company</th><th>Role</th><th>Status</th></tr>` + apps.map(a =>
-        `<tr><td class="muted" style="white-space:nowrap">${esc(a.date || "—")}</td><td>${esc(a.company)}</td><td>${esc(a.title || "—")}${a.note ? `<div class="muted" style="font-size:12px">${esc(a.note)}</div>` : ""}</td>
-        <td><span style="color:${APP_COLOR[a.status] || "var(--text)"};font-weight:600">${APP_LABEL[a.status] || esc(a.status)}</span></td></tr>`).join("") + `</table>`
-    : `<div class="empty">Nothing here yet.</div>`;
+  APPS = ((await getJSON("/api/applications")).applications || []).slice()
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  renderApps();
 }
 
-async function saveApps() {
-  const msg = document.getElementById("appmsg");
-  let body;
-  try { body = JSON.parse(document.getElementById("appimport").value); }
-  catch (e) { msg.textContent = "That isn't valid JSON. Paste the whole text, from { to }."; return; }
-  try {
-    const r = await fetch("/api/applications", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-    const d = await r.json();
-    if (!r.ok) { msg.textContent = d.error || "Save failed."; return; }
-    msg.textContent = `Saved ${d.count} application(s).`;
-    document.getElementById("appimport").value = "";
-    await loadApps();
-  } catch (e) { msg.textContent = "Save failed: " + e.message; }
+function renderApps() {
+  const counts = {};
+  APPS.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
+  APPS = APPS.filter(a => (a.date || "9999") >= "2026-10-01");   // from 1 October 2026 onwards
+  document.getElementById("appcount").textContent = APPS.length ? `(${APPS.length})` : "";
+  const chip = (key, label, color, n) =>
+    `<button class="chip ${APP_FILTER === key ? "on" : ""}" onclick="APP_FILTER='${key}';renderApps()">
+       <i class="dot" style="background:${color}"></i>${label} <b>${n}</b></button>`;
+  document.getElementById("appsummary").innerHTML = APPS.length
+    ? chip("all", "All", "var(--muted)", APPS.length) +
+      Object.keys(APP_LABEL).filter(k => counts[k]).map(k => chip(k, APP_LABEL[k], APP_COLOR[k], counts[k])).join(" ")
+    : `<span class="muted">No applications since 1 October 2026 yet.</span>`;
+  const shown = APPS.filter(a => APP_FILTER === "all" || a.status === APP_FILTER);
+  document.getElementById("applist").innerHTML = shown.length
+    ? `<table><tr><th>Date</th><th>Company</th><th>Role</th><th>Status</th></tr>` + shown.map(a =>
+        `<tr><td class="muted" style="white-space:nowrap">${esc(a.date || "—")}</td><td>${esc(a.company)}</td>
+        <td>${esc(a.title || "—")}${a.note ? `<div class="muted" style="font-size:12px">${esc(a.note)}</div>` : ""}</td>
+        <td><span style="color:${APP_COLOR[a.status] || "var(--text)"};font-weight:600">${APP_LABEL[a.status] || esc(a.status)}</span></td></tr>`).join("") + `</table>`
+    : `<div class="empty">Nothing here.</div>`;
 }
 
 (async () => {
