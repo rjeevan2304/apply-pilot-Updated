@@ -6,12 +6,6 @@ employers:
 
   # ── Canadian Banks & Financial ──────────────────────────────────────────
 
-  td:
-    name: "TD Bank"
-    tenant: "td"
-    site_id: "TD_Bank_Careers"
-    base_url: "https://td.wd3.myworkdayjobs.com"
-
   cibc:
     name: "CIBC"
     tenant: "cibc"
@@ -29,18 +23,6 @@ employers:
     tenant: "bmo"
     site_id: "External"
     base_url: "https://bmo.wd3.myworkdayjobs.com"
-
-  manulife:
-    name: "Manulife"
-    tenant: "manulife"
-    site_id: "MFCJH_Jobs"
-    base_url: "https://manulife.wd3.myworkdayjobs.com"
-
-  sunlife:
-    name: "Sun Life"
-    tenant: "sunlife"
-    site_id: "Experienced-Jobs"
-    base_url: "https://sunlife.wd3.myworkdayjobs.com"
 
   desjardins:
     name: "Desjardins"
@@ -71,12 +53,6 @@ employers:
     tenant: "brookfield"
     site_id: "brookfield"
     base_url: "https://brookfield.wd5.myworkdayjobs.com"
-
-  fis:
-    name: "FIS Global"
-    tenant: "fis"
-    site_id: "SearchJobs"
-    base_url: "https://fis.wd5.myworkdayjobs.com"
 
   mastercard:
     name: "Mastercard"
@@ -196,12 +172,6 @@ employers:
     site_id: "Careers"
     base_url: "https://motorolasolutions.wd5.myworkdayjobs.com"
 
-  moderna:
-    name: "Moderna"
-    tenant: "modernatx"
-    site_id: "M_tx"
-    base_url: "https://modernatx.wd1.myworkdayjobs.com"
-
   servicenow:
     name: "ServiceNow"
     tenant: "servicenow"
@@ -222,12 +192,6 @@ employers:
 
   # ── Consulting ──────────────────────────────────────────────────────────
 
-  pwc:
-    name: "PwC"
-    tenant: "pwc"
-    site_id: "Global_Experienced_Careers"
-    base_url: "https://pwc.wd3.myworkdayjobs.com"
-
   bdo:
     name: "BDO"
     tenant: "bdo"
@@ -242,12 +206,6 @@ employers:
     site_id: "External"
     base_url: "https://telusinternational.wd3.myworkdayjobs.com"
 
-  telus_health:
-    name: "TELUS Health"
-    tenant: "lifeworks"
-    site_id: "External"
-    base_url: "https://lifeworks.wd3.myworkdayjobs.com"
-
   # ── Canadian Corporate ──────────────────────────────────────────────────
 
   canadian_tire:
@@ -261,12 +219,6 @@ employers:
     tenant: "myview"
     site_id: "pc_financial"
     base_url: "https://myview.wd3.myworkdayjobs.com"
-
-  cae:
-    name: "CAE"
-    tenant: "cae"
-    site_id: "career"
-    base_url: "https://cae.wd3.myworkdayjobs.com"
 
   magna:
     name: "Magna International"
@@ -292,8 +244,3 @@ employers:
     site_id: "enbridge_careers"
     base_url: "https://enbridge.wd3.myworkdayjobs.com"
 
-  canadian_solar:
-    name: "Canadian Solar"
-    tenant: "canadiansolar"
-    site_id: "CanadianSolar"
-    base_url: "https://canadiansolar.wd5.myworkdayjobs.com"
