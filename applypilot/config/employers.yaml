@@ -196,12 +196,6 @@ employers:
     site_id: "Careers"
     base_url: "https://motorolasolutions.wd5.myworkdayjobs.com"
 
-  thomson_reuters:
-    name: "Thomson Reuters"
-    tenant: "thomsonreuters"
-    site_id: "External_Career_Site"
-    base_url: "https://thomsonreuters.wd5.myworkdayjobs.com"
-
   moderna:
     name: "Moderna"
     tenant: "modernatx"

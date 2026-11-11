@@ -12,13 +12,11 @@ defaults:
 sites:
 - linkedin
 - indeed
+# Remote roles only (open to the UAE). Onsite UAE roles are not searched.
 locations:
-- label: Dubai
-  location: Dubai, United Arab Emirates
-  remote: false
-- label: Abu Dhabi
-  location: Abu Dhabi, United Arab Emirates
-  remote: false
+- label: Remote (UAE)
+  location: United Arab Emirates
+  remote: true
 queries:
 - query: Associate Product Manager
   tier: 1

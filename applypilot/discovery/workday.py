@@ -221,8 +221,10 @@ def search_employer(
 
         for j in postings:
             loc = j.get("locationsText", "")
-            if location_filter and accept_locs is not None and reject_locs is not None:
-                if not _location_ok(loc, accept_locs, reject_locs):
+            if location_filter:
+                # Only India, or remote roles open to India (see filters.india_open).
+                from applypilot.discovery.filters import india_open
+                if not india_open(loc):
                     continue
 
             all_jobs.append({
