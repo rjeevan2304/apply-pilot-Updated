@@ -548,6 +548,13 @@ def cycle(
             log.exception("Pipeline run failed; exporting whatever is ready")
 
         heartbeat.stop()
+        # Application statuses from Gmail (only if connected; never fails the run).
+        try:
+            from applypilot.gmail_sync import CLIENT_FILE, TOKEN_FILE, sync as gmail_sync
+            if TOKEN_FILE.exists() and CLIENT_FILE.exists():
+                gmail_sync(gcs_uri=_gcs_uri(gcs) or None)
+        except Exception:
+            log.warning("Gmail status update skipped", exc_info=True)
         # Always refresh the CSV, even if a stage failed part-way.
         try:
             _do_export(min_score, output, no_copy=False, gcs=gcs, quiet=True)
@@ -618,6 +625,25 @@ def companies(
         new, existing = store_postings(get_connection(), postings)
         console.print(f"[green]Saved:[/green] {new} new, {existing} already in the database. "
                       "Run [bold]applypilot cycle[/bold] (or run score tailor pdf) to tailor resumes.")
+
+
+@app.command("gmail-login")
+def gmail_login() -> None:
+    """One-time: connect read-only Gmail access so each run can update your applications."""
+    _bootstrap()
+    from applypilot.gmail_sync import login
+    login()
+
+
+@app.command("gmail-sync")
+def gmail_sync_cmd(
+    gcs: Optional[str] = typer.Option(None, "--gcs", help="Also upload applications.json to this bucket folder."),
+) -> None:
+    """Read your application emails now and update applications.json (shown on the dashboard)."""
+    _bootstrap()
+    from applypilot.gmail_sync import sync
+    res = sync(gcs_uri=_gcs_uri(gcs) or None)
+    console.print(f"[green]{res['count']} application(s)[/green] {res['counts']} saved to {res['path']}")
 
 
 @app.command()

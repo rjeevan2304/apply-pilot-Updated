@@ -22,7 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.1"]
-gcp = ["google-cloud-storage>=2.10"]
+gcp = ["google-cloud-storage>=2.10", "google-api-python-client>=2.0", "google-auth-oauthlib>=1.0"]
 jobspy = ["python-jobspy>=1.4.1"]
 
 [project.scripts]
