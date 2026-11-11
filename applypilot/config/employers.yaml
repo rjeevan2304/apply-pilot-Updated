@@ -6,6 +6,12 @@ employers:
 
   # ── Canadian Banks & Financial ──────────────────────────────────────────
 
+  td:
+    name: "TD Bank"
+    tenant: "td"
+    site_id: "TD_Bank_Careers"
+    base_url: "https://td.wd3.myworkdayjobs.com"
+
   cibc:
     name: "CIBC"
     tenant: "cibc"
@@ -23,6 +29,12 @@ employers:
     tenant: "bmo"
     site_id: "External"
     base_url: "https://bmo.wd3.myworkdayjobs.com"
+
+  manulife:
+    name: "Manulife"
+    tenant: "manulife"
+    site_id: "MFCJH_Jobs"
+    base_url: "https://manulife.wd3.myworkdayjobs.com"
 
   desjardins:
     name: "Desjardins"
@@ -244,3 +256,8 @@ employers:
     site_id: "enbridge_careers"
     base_url: "https://enbridge.wd3.myworkdayjobs.com"
 
+  canadian_solar:
+    name: "Canadian Solar"
+    tenant: "canadiansolar"
+    site_id: "CanadianSolar"
+    base_url: "https://canadiansolar.wd5.myworkdayjobs.com"
