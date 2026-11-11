@@ -150,3 +150,18 @@ def test_refuses_public_address_without_password(monkeypatch, tmp_path):
     monkeypatch.delenv("APPLYPILOT_UI_PASSWORD", raising=False)
     with pytest.raises(SystemExit, match="APPLYPILOT_UI_PASSWORD"):
         ui.serve(ui.LocalSource(tmp_path), port=0, open_browser=False, host="0.0.0.0")
+
+
+def test_applications_older_than_two_months_hidden(tmp_path, monkeypatch):
+    from datetime import date, timedelta
+    monkeypatch.setattr(ui, "UI_HOME", tmp_path / "ui-home")
+    short = tmp_path / "short"
+    short.mkdir()
+    (short / "shortlist.csv").write_text("company,title\n")
+    old = (date.today() - timedelta(days=90)).isoformat()
+    new = (date.today() - timedelta(days=3)).isoformat()
+    (short / "applications.json").write_text(json.dumps({"applications": [
+        {"company": "Old", "status": "applied", "date": old},
+        {"company": "New", "status": "assessment", "date": new}]}))
+    app = ui.App(ui.LocalSource(short))
+    assert [a["company"] for a in app.applications] == ["New"]

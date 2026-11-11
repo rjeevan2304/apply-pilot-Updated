@@ -21,7 +21,7 @@ import os
 import threading
 import time
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -29,7 +29,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 STATIC = Path(__file__).with_name("static")
 DECISIONS = ("apply", "retry", "no", "lowpay")  # green, yellow, red, pink
-APP_STATUSES = ("applied", "interview", "offer", "rejected", "withdrawn")
+APP_STATUSES = ("applied", "assessment", "next_steps", "interview", "offer", "rejected", "withdrawn")
+APP_WINDOW_DAYS = 60
 APP_FIELDS = ("company", "title", "date", "status", "note")
 UI_HOME = Path(os.environ.get("APPLYPILOT_UI_DIR", Path.home() / ".applypilot-ui"))
 
@@ -221,9 +222,11 @@ class App:
             self.jobs = list(csv.DictReader(io.StringIO(raw.decode("utf-8")))) if raw else []
             raw = self.source.read("applications.json", fresh=True)
             try:
-                self.applications = (json.loads(raw) or {}).get("applications", []) if raw else []
+                items = (json.loads(raw) or {}).get("applications", []) if raw else []
             except (ValueError, AttributeError):
-                self.applications = []
+                items = []
+            cutoff = (datetime.now().date() - timedelta(days=APP_WINDOW_DAYS)).isoformat()
+            self.applications = [a for a in items if (a.get("date") or "9999") >= cutoff]
             raw = self.source.read("decisions.json", fresh=True)
             if raw:
                 try:
