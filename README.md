@@ -186,6 +186,33 @@ rate limits or server errors. At most 2 requests are in flight at once (`KIE_MAX
 `applypilot cycle` never submits applications. The `apply` command (Claude Code + Chrome
 auto-apply) is still there but isn't needed.
 
+## Gmail access (application statuses)
+
+`applypilot` can read your application emails (read-only) and keep the Applications tab up to date:
+applied, interview, offer, rejected. Only company, role, date, status and a short note are stored.
+
+**One-time setup in Google Cloud** (project shown at the top of the console):
+1. **APIs & Services → Library →** search **Gmail API** → **Enable**.
+2. **APIs & Services → OAuth consent screen →** user type **External** → app name `ApplyPilot`,
+   your email as support and developer contact → **Scopes → Add** `.../auth/gmail.readonly` →
+   **Test users → Add** your Gmail address → **Save**. Then **Publish app**, so the link doesn't
+   expire every 7 days. Google may show an "unverified app" screen; that's expected for your own app.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID →** type **Desktop app**
+   → **Create** → **Download JSON**.
+
+**On the VM** (after `git pull` and `bash deploy/gcp/setup.sh ...`):
+```bash
+.venv/bin/applypilot gmail-login
+```
+Open the link it prints in your browser and approve. The browser then shows an error page; copy the
+whole address from its address bar and paste it into the VM. The sign-in is saved on the VM only.
+
+Test it:
+```bash
+.venv/bin/applypilot gmail-sync --gcs gs://YOUR_BUCKET/applypilot
+```
+After that, every scheduled run refreshes the statuses automatically.
+
 ## Local dashboard (`applypilot ui`)
 
 A page on your own computer with the pipeline status and every shortlisted job: details,

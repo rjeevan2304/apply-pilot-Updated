@@ -29,6 +29,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 STATIC = Path(__file__).with_name("static")
 DECISIONS = ("apply", "retry", "no", "lowpay")  # green, yellow, red, pink
+APP_STATUSES = ("applied", "interview", "offer", "rejected", "withdrawn")
+APP_FIELDS = ("company", "title", "date", "status", "note")
 UI_HOME = Path(os.environ.get("APPLYPILOT_UI_DIR", Path.home() / ".applypilot-ui"))
 
 
@@ -159,6 +161,7 @@ class App:
         self.lock = threading.Lock()
         self.decisions_path = UI_HOME / "decisions.json"
         self.decisions: dict = self._load_local_decisions()
+        self.applications: list[dict] = []
         self.refresh()
 
     # -- decisions ------------------------------------------------------------
@@ -216,6 +219,11 @@ class App:
                 self.status = {}
             raw = self.source.read("shortlist.csv", fresh=True)
             self.jobs = list(csv.DictReader(io.StringIO(raw.decode("utf-8")))) if raw else []
+            raw = self.source.read("applications.json", fresh=True)
+            try:
+                self.applications = (json.loads(raw) or {}).get("applications", []) if raw else []
+            except (ValueError, AttributeError):
+                self.applications = []
             raw = self.source.read("decisions.json", fresh=True)
             if raw:
                 try:
@@ -223,6 +231,31 @@ class App:
                 except ValueError:
                     pass
             self.loaded_at = _now()
+
+    def save_applications(self, items: list) -> list[dict]:
+        """Validate and store your application list (company, role, date, status, note only)."""
+        clean = []
+        for it in items:
+            if not isinstance(it, dict):
+                raise ValueError("each application must be an object")
+            company = str(it.get("company", "")).strip()[:200]
+            status = str(it.get("status", "")).strip().lower()
+            if not company:
+                raise ValueError("every application needs a company")
+            if status not in APP_STATUSES:
+                raise ValueError(f"status must be one of: {', '.join(APP_STATUSES)}")
+            clean.append({
+                "company": company,
+                "title": str(it.get("title", "")).strip()[:200],
+                "date": str(it.get("date", "")).strip()[:10],
+                "status": status,
+                "note": str(it.get("note", "")).strip()[:500],
+            })
+        with self.lock:
+            self.applications = clean
+            data = json.dumps({"updated": _now(), "applications": clean}, indent=2).encode("utf-8")
+            self.source.write("applications.json", data)
+        return clean
 
     def jobs_payload(self) -> list[dict]:
         out = []
@@ -285,6 +318,8 @@ def make_handler(app: App):
                                    "protected": bool(_password())})
             if url.path == "/api/jobs":
                 return self._json(app.jobs_payload())
+            if url.path == "/api/applications":
+                return self._json({"applications": app.applications})
             if url.path.startswith("/files/"):
                 try:
                     rel = _safe_rel(url.path[len("/files/"):])
@@ -330,6 +365,15 @@ def make_handler(app: App):
                 except Exception as exc:
                     return self._json({"error": str(exc)}, 502)
                 return self._json({"ok": True, "loaded_at": app.loaded_at})
+            if url.path == "/api/applications":
+                try:
+                    items = body.get("applications")
+                    if not isinstance(items, list):
+                        raise ValueError("send {\"applications\": [...]}")
+                    saved = app.save_applications(items)
+                except (ValueError, TypeError) as exc:
+                    return self._json({"error": str(exc)}, 400)
+                return self._json({"ok": True, "count": len(saved)})
             if url.path == "/api/decision":
                 try:
                     entry = app.set_decision(body["url"], body.get("decision"), body.get("note"))
