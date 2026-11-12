@@ -26,6 +26,9 @@ from applypilot.database import get_connection, job_company
 
 log = logging.getLogger(__name__)
 
+# Your experience is about 1 year 2 months. Postings asking for more than this are left out.
+MAX_YEARS_REQUIRED = 2
+
 CSV_FIELDS = (
     "company", "title", "region", "location", "fit_score", "salary", "apply_url",
     "job_url", "discovered_at", "tailored_at", "resume_pdf", "resume_txt",
@@ -95,6 +98,12 @@ def export_shortlist(
     from applypilot.discovery.filters import india_open, uae_open
     jobs = [j for j in jobs
             if (uae_open(j.get("location")) if (j.get("region") == "UAE") else india_open(j.get("location")))]
+
+    # Experience: postings asking for more than MAX_YEARS_REQUIRED years are left out.
+    from applypilot.scoring.scorer import min_years_required
+    jobs = [j for j in jobs
+            if (min_years_required(j.get("title"), j.get("url"), j.get("full_description")) or 0)
+            <= MAX_YEARS_REQUIRED]
 
     out = Path(output_dir) if output_dir else default_export_dir()
     out.mkdir(parents=True, exist_ok=True)
