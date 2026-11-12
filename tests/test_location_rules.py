@@ -36,3 +36,12 @@ def test_thomson_reuters_removed():
     employers = yaml.safe_load((CONFIG_DIR / "employers.yaml").read_text())["employers"]
     assert not any("thomson" in k.lower() or "thomson" in (v.get("name") or "").lower()
                    for k, v in employers.items())
+
+
+def test_job_board_remote_flag_does_not_bypass_location():
+    from applypilot.discovery.filters import india_open
+    # A "remote" posting tied to another country must not pass for India
+    assert not india_open("Dubai, United Arab Emirates (Remote)")
+    assert not india_open("United States (Remote)")
+    assert india_open("Remote (Remote)")
+    assert india_open("Hyderabad, Telangana, India (Remote)")

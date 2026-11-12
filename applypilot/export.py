@@ -89,6 +89,12 @@ def export_shortlist(
         (min_score,),
     ).fetchall()
     jobs = [dict(r) for r in rows]
+    # Only jobs you can take: India (or remote open to India) for the India search,
+    # remote open to the UAE for the UAE search. Other countries and hybrid/onsite
+    # roles abroad are left out, including ones saved before this rule existed.
+    from applypilot.discovery.filters import india_open, uae_open
+    jobs = [j for j in jobs
+            if (uae_open(j.get("location")) if (j.get("region") == "UAE") else india_open(j.get("location")))]
 
     out = Path(output_dir) if output_dir else default_export_dir()
     out.mkdir(parents=True, exist_ok=True)
