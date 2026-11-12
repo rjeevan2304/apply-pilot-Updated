@@ -322,7 +322,7 @@ def _run_one_search(
 
     # Filter by location and title before storing.
     before = len(df)
-    from applypilot.discovery.filters import uae_open
+    from applypilot.discovery.filters import india_open, uae_open
 
     def _row_location_ok(row):
         remote_value = str(row.get("is_remote", False)).strip().lower()
@@ -332,7 +332,9 @@ def _run_one_search(
         if _REGION == "UAE":
             # The UAE search is for remote roles only, and they must be open to the UAE.
             return is_remote and uae_open(loc)
-        if is_remote: return True
+        # A "remote" flag isn't enough: the role must also be open to India
+        # (a remote job tied to Dubai, the US, etc. is not for you).
+        if is_remote: return india_open(loc)
         return _location_ok(loc, accept_locs, reject_locs)
     df = df[df.apply(_row_location_ok, axis=1)]
     location_filtered = before - len(df)
