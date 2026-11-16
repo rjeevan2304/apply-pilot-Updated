@@ -99,6 +99,10 @@ def export_shortlist(
     jobs = [j for j in jobs
             if (uae_open(j.get("location")) if (j.get("region") == "UAE") else india_open(j.get("location")))]
 
+    # Companies you've excluded (applypilot/config/excluded_companies.yaml).
+    from applypilot.discovery.filters import company_excluded
+    jobs = [j for j in jobs if not company_excluded(job_company(j))]
+
     # Experience: postings asking for more than MAX_YEARS_REQUIRED years are left out.
     from applypilot.scoring.scorer import min_years_required
     jobs = [j for j in jobs

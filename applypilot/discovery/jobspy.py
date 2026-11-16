@@ -151,6 +151,9 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
 
         title = str(row.get("title", "")) if str(row.get("title", "")) != "nan" else None
         company = str(row.get("company", "")) if str(row.get("company", "")) != "nan" else None
+        from applypilot.discovery.filters import company_excluded
+        if company_excluded(company):
+            continue
         location_str = str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None
 
         # Build salary string from min/max

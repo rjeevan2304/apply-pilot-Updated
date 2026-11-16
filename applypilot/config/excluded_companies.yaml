@@ -1,0 +1,6 @@
+# Companies to leave out everywhere: searches, job boards, dashboard and shortlist.
+# Matching is case-insensitive on the company name (whole words).
+excluded_companies:
+  - Scoutit
+  - Joblet-AI
+  - TalentRabbit
