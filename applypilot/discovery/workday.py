@@ -352,6 +352,9 @@ def _process_one(
 ) -> dict:
     """Search one employer, fetch details, store results."""
     emp = employers[employer_key]
+    from applypilot.discovery.filters import company_excluded
+    if company_excluded(emp.get("name")):
+        return {"employer": emp["name"], "query": search_text, "found": 0, "new": 0, "existing": 0}
 
     try:
         jobs = search_employer(

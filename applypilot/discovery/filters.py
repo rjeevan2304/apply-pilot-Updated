@@ -5,6 +5,32 @@ from __future__ import annotations
 import re
 
 
+_EXCLUDED: list[str] | None = None
+
+
+def excluded_companies() -> list[str]:
+    """Company names to leave out (applypilot/config/excluded_companies.yaml, plus
+    ~/.applypilot/excluded_companies.yaml if present)."""
+    global _EXCLUDED
+    if _EXCLUDED is None:
+        import yaml
+        from applypilot import config
+        names: list[str] = []
+        for path in (config.CONFIG_DIR / "excluded_companies.yaml", config.APP_DIR / "excluded_companies.yaml"):
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                names += [str(n) for n in data.get("excluded_companies", [])]
+            except OSError:
+                pass
+        _EXCLUDED = [n.strip().lower() for n in names if n and n.strip()]
+    return _EXCLUDED
+
+
+def company_excluded(name: str | None) -> bool:
+    low = (name or "").lower()
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(n)}(?![a-z0-9])", low) for n in excluded_companies())
+
+
 _INDIA_PLACES = ("india", "bangalore", "bengaluru", "hyderabad", "pune", "chennai", "mumbai",
                  "delhi", "new delhi", "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad",
                  "kochi", "jaipur")

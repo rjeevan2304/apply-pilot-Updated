@@ -327,7 +327,10 @@ def collect(entries: list[dict] | None = None, keywords: list[str] | None = None
     kept: list[Posting] = []
     report: list[dict] = []
     with httpx.Client(timeout=_TIMEOUT, headers={"User-Agent": _UA}, follow_redirects=True) as client:
+        from applypilot.discovery.filters import company_excluded
         for entry in entries:
+            if company_excluded(entry.get("name")):
+                continue
             row = {"company": entry["name"], "source": "", "total": 0, "eligible": 0, "kept": 0, "error": ""}
             try:
                 postings, row["source"] = fetch_company(client, entry)
