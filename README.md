@@ -40,6 +40,68 @@ Then fill in `profile.json` (personal details, skills, resume facts), edit `sear
 
 Personal data (profile, resume, database, logs, tailored resumes) is never committed — see `.gitignore`.
 
+## Making it yours (if you're using this for your own job search)
+
+This repo was built for one person's search. To use it for yours, change the items below. Nothing
+else needs to change for the job search itself. Start with the first four: they decide what you
+get shown.
+
+### 1. Your details (required)
+
+| File on your machine or VM | What to put in it |
+|---|---|
+| `~/.applypilot/profile.json` | Your name, contact details, work authorisation, salary expectations, and the facts about your experience the AI may use. Start from `config/profile.example.json`. |
+| `~/.applypilot/resume.txt` | Your resume as plain text. The tailored resumes are built from this, so keep it accurate. |
+| `~/.applypilot/.env` | Your API keys: `GEMINI_API_KEY`, and optionally `ANTHROPIC_API_KEY`. Start from `config/.env.example`. Never commit this file. |
+
+### 2. What to search for
+
+| File | What to change |
+|---|---|
+| `~/.applypilot/searches.yaml` | `queries` (job titles, with a tier 1 or 2 for priority), `locations` (cities, plus a remote entry if you want one), `sites` (LinkedIn, Indeed, Naukri), `location_accept` (places that count as yours), and the search limits (`time_budget_minutes`, `recheck_after_hours`). Start from `config/searches.example.yaml`. |
+| `~/.applypilot/searches_uae.yaml` | A second search region. Delete the file to turn it off, or change the places and titles. Start from `config/searches_uae.example.yaml`. |
+| `applypilot/config/companies.yaml` | Your target companies, the ATS (Greenhouse, Lever, Ashby, Workable or Atlassian) and board name for each, and the title words to keep or drop. You can copy it to `~/.applypilot/companies.yaml` to keep your list out of the repo. |
+| `applypilot/config/excluded_companies.yaml` | Companies to leave out everywhere. Or put your own list in `~/.applypilot/excluded_companies.yaml`. |
+
+### 3. Where you're willing to work (code)
+
+These are set in code, not in a config file, so change them in the places listed:
+
+- **Places that count as "yours"**: `_INDIA_PLACES` and `_UAE_PLACES` in `applypilot/discovery/filters.py`. Add your city or country, or remove the UAE if you're not looking there.
+- **Maximum experience**: `MAX_YEARS_REQUIRED` in `applypilot/export.py` (currently 2). Postings asking for more years are left out of the shortlist.
+- **Start date for application tracking**: `SINCE` in `applypilot/gmail_sync.py`, `APP_SINCE` in `applypilot/ui/server.py`, and the `"2026-10-01"` date in `applypilot/ui/static/index.html`. Set all three to your own start date.
+- **Job title filter**: `title_ok` in `applypilot/discovery/filters.py` drops senior, lead, intern and sales-type titles. Change these if your level is different.
+
+### 4. Workday career sites (optional)
+
+`applypilot/config/employers.yaml` lists about 40 large employers that use Workday. Each entry has
+the company's Workday address. Remove the ones you don't want, and add your own. A company whose
+roles are all outside your location produces no results (the location rule drops them), so
+removing it only saves search time.
+
+### 5. Your own cloud setup (only if you use the VM, dashboard or Gmail)
+
+Everything in this section is tied to the project, bucket and account of the original owner, so
+use your own:
+
+- **Google Cloud project and bucket**: pass your own `gs://your-bucket/folder` to `deploy/gcp/setup.sh`,
+  `deploy/cloudrun/deploy.sh` and `applypilot cycle --gcs`. Don't reuse the example names.
+- **Gmail sign-in**: create your own OAuth client in your Google Cloud project, and add your
+  own Gmail address as a test user. See "Gmail access" below.
+- **Repo links**: the `git clone` commands point to the original repository. Replace them with
+  your fork's address.
+- **Dashboard password**: choose your own when you deploy. It's never stored in the repo.
+
+### 6. Check before your first run
+
+```bash
+.venv/bin/applypilot doctor          # checks your files and keys
+.venv/bin/applypilot companies       # shows matching roles at your target companies
+bash deploy/gcp/test_run.sh          # small end-to-end test in a separate folder
+```
+
+Keep `TEST_MIN_SCORE` at 7 for real runs. Lower it only for the test.
+
 ## Usage: shortlist + tailored resumes (apply manually)
 
 This fork is set up to **find jobs and tailor resumes only**; you apply yourself.
