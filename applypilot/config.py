@@ -101,6 +101,23 @@ def load_profile() -> dict:
     return json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
 
 
+def load_company_searches() -> list[str]:
+    """Company names searched by name (packaged list + optional ~/.applypilot/company_searches.yaml)."""
+    import yaml
+    names: list[str] = []
+    for path in (CONFIG_DIR / "company_searches.yaml", APP_DIR / "company_searches.yaml"):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            names += [str(n).strip() for n in data.get("company_searches", []) if str(n).strip()]
+        except OSError:
+            pass
+    seen, out = set(), []
+    for n in names:
+        if n.lower() not in seen:
+            seen.add(n.lower()); out.append(n)
+    return out
+
+
 def load_search_config() -> dict:
     """Load search configuration from ~/.applypilot/searches.yaml."""
     import yaml
