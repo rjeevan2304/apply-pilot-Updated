@@ -108,6 +108,76 @@ companies:
     ats: lever
     slug: zeta           # verified 2026-11-24
 
+  - name: Thoughtworks
+    ats: greenhouse
+    slug: thoughtworks           # verified 2026-11-24
+  - name: Lyft
+    ats: greenhouse
+    slug: lyft           # verified 2026-11-24
+  - name: Pinterest
+    ats: greenhouse
+    slug: pinterest           # verified 2026-11-24
+  - name: Reddit
+    ats: greenhouse
+    slug: reddit           # verified 2026-11-24
+  - name: Coursera
+    ats: greenhouse
+    slug: coursera           # verified 2026-11-24
+  - name: Cloudflare
+    ats: greenhouse
+    slug: cloudflare           # verified 2026-11-24
+  - name: Datadog
+    ats: greenhouse
+    slug: datadog           # verified 2026-11-24
+  - name: MongoDB
+    ats: greenhouse
+    slug: mongodb           # verified 2026-11-24
+  - name: LinkedIn
+    ats: lever
+    slug: linkedin           # verified 2026-11-24
+  - name: Agoda
+    ats: greenhouse
+    slug: agoda           # verified 2026-11-24
+  - name: Paytm
+    ats: lever
+    slug: paytm           # verified 2026-11-24
+  - name: Akuna Capital
+    ats: greenhouse
+    slug: akunacapital           # verified 2026-11-24
+  - name: Point72
+    ats: greenhouse
+    slug: point72           # verified 2026-11-24
+  - name: Nasdaq
+    ats: greenhouse
+    slug: nasdaq           # verified 2026-11-24
+  - name: Pure Storage
+    ats: greenhouse
+    slug: purestorage           # verified 2026-11-24
+  - name: Gusto
+    ats: greenhouse
+    slug: gusto           # verified 2026-11-24
+  - name: Affirm
+    ats: greenhouse
+    slug: affirm           # verified 2026-11-24
+  - name: Chime
+    ats: greenhouse
+    slug: chime           # verified 2026-11-24
+  - name: Robinhood
+    ats: greenhouse
+    slug: robinhood           # verified 2026-11-24
+  - name: Plaid
+    ats: ashby
+    slug: plaid           # verified 2026-11-24
+  - name: Brex
+    ats: greenhouse
+    slug: brex           # verified 2026-11-24
+  - name: Figma
+    ats: greenhouse
+    slug: figma           # verified 2026-11-24
+  - name: Notion
+    ats: ashby
+    slug: notion           # verified 2026-11-24
+
 # Keep only titles containing one of these words (case-insensitive, whole words).
 # Leave empty to keep every title (the LLM scorer still filters by fit).
 title_keywords:
