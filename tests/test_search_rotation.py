@@ -18,6 +18,7 @@ def run(monkeypatch, tmp_path, cfg, stop_after):
             clock["t"] = 10_000.0          # past the deadline -> next iteration stops
         return {"new": 0, "existing": 0, "errors": 0}
 
+    monkeypatch.setattr(js.config, "load_company_searches", lambda: [])   # rotation tests: job-board queries only
     monkeypatch.setattr(js, "_run_one_search", fake_search)
     monkeypatch.setattr(js.time, "time", lambda: clock["t"])
     monkeypatch.setattr(js.time, "sleep", lambda s: None)
@@ -73,3 +74,29 @@ def test_recent_searches_are_not_repeated(monkeypatch, tmp_path):
     data = json.loads(log.read_text())
     log.write_text(json.dumps({k: v - 24 * 3600 for k, v in data.items()}))  # a day later
     assert run(monkeypatch, tmp_path, cfg, 9) == ["A", "B", "C"]
+
+
+def test_company_searches_added_for_india_only(monkeypatch, tmp_path):
+    import applypilot.discovery.jobspy as js
+    seen = []
+    monkeypatch.setattr(js, "_run_one_search", lambda s, *a, **k: seen.append((s["query"], s["location"])) or
+                        {"new": 0, "existing": 0, "errors": 0})
+    monkeypatch.setattr(js.time, "sleep", lambda s: None)
+    monkeypatch.setattr(js.config, "APP_DIR", tmp_path)
+    monkeypatch.setattr(js, "init_db", lambda: None)
+    monkeypatch.setattr(js, "get_connection", lambda: type("C", (), {"execute": lambda *a: type("R", (), {"fetchone": lambda s: [0]})()})())
+    monkeypatch.setattr(js.config, "load_company_searches", lambda: ["Goldman Sachs", "Visa"])
+    cfg = {"queries": [{"query": "Analyst", "tier": 1}], "locations": [{"location": "Hyderabad"}],
+           "recheck_after_hours": 0}
+    js._full_crawl(search_cfg=dict(cfg), sites=["indeed"])
+    assert ("Goldman Sachs", "India") in seen and ("Visa", "India") in seen
+    seen.clear()
+    js._full_crawl(search_cfg=dict(cfg, region="UAE"), sites=["indeed"])
+    assert not any(q in ("Goldman Sachs", "Visa") for q, _ in seen)
+
+
+def test_packaged_company_list_is_used_automatically():
+    from applypilot import config
+    names = config.load_company_searches()
+    assert len(names) > 100 and "Goldman Sachs" in names and "Google" in names
+    assert len({n.lower() for n in names}) == len(names)

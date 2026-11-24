@@ -1,0 +1,115 @@
+# Companies searched by name for India (one search each). Used automatically on every run.
+# To add your own without changing this file, put a list under `company_searches:` in
+# ~/.applypilot/company_searches.yaml. Entries from that file are added to these.
+company_searches:
+  - Glean
+  - Rippling
+  - Oracle
+  - Meta
+  - SAP
+  - Texas Instruments
+  - Flipkart
+  - Razorpay
+  - PhonePe
+  - Swiggy
+  - Zomato
+  - Goldman Sachs
+  - JPMorgan Chase
+  - Morgan Stanley
+  - Citi
+  - Barclays
+  - Deutsche Bank
+  - McKinsey & Company
+  - Bain & Company
+  - Deloitte
+  - ZS Associates
+  - Optiver
+  - Citadel
+  - Target
+  - Walmart
+  - Cohesity
+  - Nutanix
+  - CrowdStrike
+  - Broadcom
+  - VMware
+  - Postman
+  - BrowserStack
+  - Freshworks
+  - Zoho
+  - Zerodha
+  - Zepto
+  - Myntra
+  - Blinkit
+  - Urban Company
+  - MoveInSync
+  - Tesco
+  - Wells Fargo
+  - Visa
+  - UnitedHealth Group
+  - Optum
+  - Google
+  - Microsoft
+  - Amazon
+  - Apple
+  - Intuit
+  - Qualcomm
+  - AMD
+  - Autodesk
+  - Expedia
+  - Dell
+  - Samsung
+  - Shopify
+  - DoorDash
+  - Snap
+  - Unity
+  - Zillow
+  - HashiCorp
+  - GitHub
+  - Booking.com
+  - Grab
+  - Synopsys
+  - Cadence
+  - Micron
+  - D E Shaw
+  - Two Sigma
+  - Hudson River Trading
+  - Susquehanna
+  - Bridgewater
+  - BlackRock
+  - Fidelity
+  - American Express
+  - Fiserv
+  - Bloomberg
+  - S&P Global
+  - Moody's
+  - MSCI
+  - FactSet
+  - Honeywell
+  - Bosch
+  - Siemens
+  - Applied Materials
+  - Capital One
+  - Lucid
+  - Canva
+  - Grammarly
+  - IMC Trading
+  - Jump Trading
+  - Quadeye
+  - Squarepoint
+  - Millennium
+  - Balyasny
+  - Spotify
+  - Dropbox
+  - Zoom
+  - Confluent
+  - Splunk
+  - Hitachi
+  - Ola
+  - Meesho
+  - Nykaa
+  - Dream11
+  - Cars24
+  - Lenskart
+  - Delhivery
+  - Upstox
+  - Angel One
