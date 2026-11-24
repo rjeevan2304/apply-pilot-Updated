@@ -126,3 +126,50 @@ time_budget_minutes: 180
 recheck_after_hours: 12
 # After a complete Workday pass, wait this many hours before the next one (0 = every run).
 workday_recheck_hours: 24
+# Company-name searches (India): one search per company, filtered like every other job.
+company_searches:
+- Glean
+- Rippling
+- Oracle
+- Meta
+- SAP
+- Texas Instruments
+- Flipkart
+- Razorpay
+- PhonePe
+- Swiggy
+- Zomato
+- Goldman Sachs
+- JPMorgan Chase
+- Morgan Stanley
+- Citi
+- Barclays
+- Deutsche Bank
+- McKinsey & Company
+- Bain & Company
+- Deloitte
+- ZS Associates
+- Optiver
+- Citadel
+- Target
+- Walmart
+- Cohesity
+- Nutanix
+- CrowdStrike
+- Broadcom
+- VMware
+- Postman
+- BrowserStack
+- Freshworks
+- Zoho
+- Zerodha
+- Zepto
+- Myntra
+- Blinkit
+- Urban Company
+- MoveInSync
+- Tesco
+- Wells Fargo
+- Visa
+- UnitedHealth Group
+- Optum

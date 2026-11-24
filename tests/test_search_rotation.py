@@ -73,3 +73,21 @@ def test_recent_searches_are_not_repeated(monkeypatch, tmp_path):
     data = json.loads(log.read_text())
     log.write_text(json.dumps({k: v - 24 * 3600 for k, v in data.items()}))  # a day later
     assert run(monkeypatch, tmp_path, cfg, 9) == ["A", "B", "C"]
+
+
+def test_company_searches_added_for_india_only(monkeypatch, tmp_path):
+    import applypilot.discovery.jobspy as js
+    seen = []
+    monkeypatch.setattr(js, "_run_one_search", lambda s, *a, **k: seen.append((s["query"], s["location"])) or
+                        {"new": 0, "existing": 0, "errors": 0})
+    monkeypatch.setattr(js.time, "sleep", lambda s: None)
+    monkeypatch.setattr(js.config, "APP_DIR", tmp_path)
+    monkeypatch.setattr(js, "init_db", lambda: None)
+    monkeypatch.setattr(js, "get_connection", lambda: type("C", (), {"execute": lambda *a: type("R", (), {"fetchone": lambda s: [0]})()})())
+    cfg = {"queries": [{"query": "Analyst", "tier": 1}], "locations": [{"location": "Hyderabad"}],
+           "company_searches": ["Goldman Sachs", "Visa"], "recheck_after_hours": 0}
+    js._full_crawl(search_cfg=dict(cfg), sites=["indeed"])
+    assert ("Goldman Sachs", "India") in seen and ("Visa", "India") in seen
+    seen.clear()
+    js._full_crawl(search_cfg=dict(cfg, region="UAE"), sites=["indeed"])
+    assert not any(q in ("Goldman Sachs", "Visa") for q, _ in seen)

@@ -65,6 +65,49 @@ companies:
     ats: ashby
     slug: signoz               # verified 2026-11
 
+  - name: Okta
+    ats: greenhouse
+    slug: okta           # verified 2026-11-24
+  - name: Coinbase
+    ats: greenhouse
+    slug: coinbase           # verified 2026-11-24
+  - name: Airbnb
+    ats: greenhouse
+    slug: airbnb           # verified 2026-11-24
+  - name: Rubrik
+    ats: greenhouse
+    slug: rubrik           # verified 2026-11-24
+  - name: Databricks
+    ats: greenhouse
+    slug: databricks           # verified 2026-11-24
+  - name: Stripe
+    ats: greenhouse
+    slug: stripe           # verified 2026-11-24
+  - name: Jane Street
+    ats: greenhouse
+    slug: janestreet           # verified 2026-11-24
+  - name: Tower Research Capital
+    ats: greenhouse
+    slug: towerresearchcapital           # verified 2026-11-24
+  - name: Snowflake
+    ats: ashby
+    slug: snowflake           # verified 2026-11-24
+  - name: Roku
+    ats: greenhouse
+    slug: roku           # verified 2026-11-24
+  - name: Twilio
+    ats: greenhouse
+    slug: twilio           # verified 2026-11-24
+  - name: CRED
+    ats: lever
+    slug: cred           # verified 2026-11-24
+  - name: Groww
+    ats: greenhouse
+    slug: groww           # verified 2026-11-24
+  - name: Zeta
+    ats: lever
+    slug: zeta           # verified 2026-11-24
+
 # Keep only titles containing one of these words (case-insensitive, whole words).
 # Leave empty to keep every title (the LLM scorer still filters by fit).
 title_keywords:

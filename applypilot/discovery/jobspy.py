@@ -461,6 +461,10 @@ def _full_crawl(
                 "remote": loc.get("remote", False),
                 "tier": q.get("tier", 0),
             })
+    # Company-name searches (India config only): one search per company.
+    if not search_cfg.get("region"):
+        for name in search_cfg.get("company_searches", []) or []:
+            searches.append({"query": str(name), "location": "India", "remote": False, "tier": 2})
 
     proxy_config = parse_proxy(proxy) if proxy else None
 
